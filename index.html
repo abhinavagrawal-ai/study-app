@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Study OS">
+<!-- PWA Manifest -->
+<link rel="manifest" href="manifest.json">
+
+<!-- Theme color for Android Chrome toolbar -->
+<meta name="theme-color" content="#f0b429">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- App icons for Android -->
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+
+<!-- Apple touch icons (iOS) -->
+<link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+<link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+
+<title>CA Abhinav — Study OS</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:     #07080f;
+  --s1:     #0d0e1a;
+  --s2:     #12131f;
+  --s3:     #1a1b2e;
+  --border: #252640;
+  --gold:   #f0b429;
+  --gold2:  #e07b00;
+  --glow:   rgba(240,180,41,0.2);
+  --red:    #ff3b55;
+  --green:  #00dfa2;
+  --text:   #dde0f0;
+  --muted:  #55577a;
+  --radius: 16px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── HEADER ── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(13,14,26,0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  letter-spacing: 4px;
+  background: linear-gradient(90deg, var(--gold), var(--gold2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header-right { text-align: right; }
+.header-clock {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.header-date {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* ── MAIN SCROLL AREA ── */
+.main {
+  padding: 16px;
+  padding-bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── CARDS ── */
+.card {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.card-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 14px;
+  letter-spacing: 3px;
+  color: var(--gold);
+  margin-bottom: 12px;
+}
+
+/* ── TIMER SECTION ── */
+.timer-card {
+  background: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+/* mode pills */
+.mode-pills {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.pill {
+  background: var(--s3);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'Syne', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 8px 4px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  line-height: 1.3;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pill.active {
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  border-color: var(--gold);
+  color: #000;
+}
+
+/* custom input */
+.custom-row {
+  display: none;
+  gap: 8px;
+  width: 100%;
+}
+.custom-row.show { display: flex; }
+
+.t-input {
+  flex: 1;
+  background: var(--s3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-radius: 10px;
+  outline: none;
+}
+.t-input:focus { border-color: var(--gold); }
+.t-input::placeholder { color: var(--muted); }
+
+.t-add {
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  border: none;
+  color: #000;
+  font-weight: 800;
+  font-size: 20px;
+  width: 44px;
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ring timer */
+.timer-wrap {
+  position: relative;
+  width: 220px;
+  height: 220px;
+}
+
+.ring-svg {
+  width: 220px;
+  height: 220px;
+  transform: rotate(-90deg);
+}
+
+.ring-bg { fill: none; stroke: var(--s3); stroke-width: 10; }
+.ring-track {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 628;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1s linear, stroke 0.4s;
+  filter: drop-shadow(0 0 10px var(--gold));
+}
+
+.ring-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.timer-digits {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 62px;
+  letter-spacing: 4px;
+  color: #fff;
+  line-height: 1;
+}
+
+.timer-mode-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.timer-session {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  margin-top: 3px;
+  font-weight: 600;
+}
+
+/* controls */
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.btn-play {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  border: none;
+  cursor: pointer;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 28px var(--glow);
+  transition: transform 0.15s;
+  -webkit-user-select: none;
+}
+.btn-play:active { transform: scale(0.92); }
+
+.btn-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--s2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.btn-icon:active { border-color: var(--gold); color: var(--gold); }
+
+/* topic chip */
+.topic-chip {
+  width: 100%;
+  background: rgba(240,180,41,0.08);
+  border: 1px solid rgba(240,180,41,0.3);
+  border-radius: 10px;
+  padding: 8px 14px;
+  text-align: center;
+}
+.tc-label {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 2px;
+}
+.tc-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ── STATS GRID ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.stat-box {
+  background: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+}
+
+.stat-n {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 32px;
+  color: var(--gold);
+  letter-spacing: 2px;
+  line-height: 1;
+}
+
+.stat-l {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── PROGRESS ── */
+.prog-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.prog-labels span { color: var(--gold); }
+
+.prog-bg {
+  background: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.prog-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold2), var(--gold));
+  border-radius: 99px;
+  transition: width 0.8s ease;
+  width: 0%;
+}
+
+/* ── STREAK ── */
+.streak-display {
+  text-align: center;
+  padding: 16px;
+  background: var(--s3);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.streak-n {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 56px;
+  color: var(--gold);
+  letter-spacing: 2px;
+  line-height: 1;
+  filter: drop-shadow(0 0 14px var(--glow));
+}
+
+.streak-l {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── TOPICS ── */
+.topic-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.topics-ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.t-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.t-item.active { border-color: var(--gold); background: rgba(240,180,41,0.08); color: var(--gold); }
+.t-item.done { opacity: 0.35; text-decoration: line-through; }
+
+.t-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.t-item.active .t-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.t-item.done .t-dot { background: var(--green); }
+
+.t-acts { margin-left: auto; display: flex; gap: 6px; }
+.t-btn {
+  background: none; border: none;
+  color: var(--muted); cursor: pointer;
+  font-size: 15px; padding: 2px 4px;
+}
+
+/* ── LOG ── */
+.log-ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.log-row {
+  display: flex;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.log-t { color: var(--gold); flex-shrink: 0; }
+
+/* ── QUOTE ── */
+.quote-box {
+  background: var(--s3);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1.6;
+  font-style: italic;
+  text-align: center;
+}
+
+/* ── RESET BTN ── */
+.reset-btn {
+  width: 100%;
+  background: var(--s3);
+  border: 1px solid var(--border);
+  color: var(--red);
+  font-family: 'Syne', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+/* ── OVERLAY POPUP ── */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.92);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+.overlay.show { opacity: 1; pointer-events: all; }
+
+.popup {
+  background: var(--s2);
+  border: 1px solid var(--gold);
+  border-radius: 24px 24px 0 0;
+  padding: 32px 24px 40px;
+  text-align: center;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 -20px 80px rgba(240,180,41,0.2);
+  transform: translateY(100%);
+  transition: transform 0.4s cubic-bezier(.34,1.56,.64,1);
+}
+.overlay.show .popup { transform: translateY(0); }
+
+.popup.break-style { border-color: var(--green); box-shadow: 0 -20px 80px rgba(0,223,162,0.15); }
+
+.popup-handle {
+  width: 40px; height: 4px;
+  background: var(--border);
+  border-radius: 99px;
+  margin: 0 auto 20px;
+}
+
+.popup-emoji { font-size: 48px; display: block; margin-bottom: 8px; }
+
+.popup-h {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 30px;
+  letter-spacing: 4px;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+.break-style .popup-h { color: var(--green); }
+
+.popup-sub {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+
+.popup-ca {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px;
+  letter-spacing: 3px;
+  display: block;
+  margin: 10px 0 6px;
+  background: linear-gradient(90deg, var(--gold), var(--gold2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.popup-meta {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+.popup-meta b { color: var(--green); font-size: 14px; }
+
+.popup-cta {
+  width: 100%;
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  color: #000;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  letter-spacing: 3px;
+  padding: 16px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 24px rgba(240,180,41,0.35);
+}
+.break-style .popup-cta { background: linear-gradient(135deg, var(--green), #00a87a); }
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(20px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.card, .timer-card { animation: fadeUp 0.4s ease both; }
+
+@keyframes ring-pulse {
+  0%,100% { filter: drop-shadow(0 0 8px var(--gold)); }
+  50%      { filter: drop-shadow(0 0 20px var(--gold)); }
+}
+.running-ring .ring-track { animation: ring-pulse 2s infinite; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* safe area for iPhone notch */
+.main { padding-bottom: max(40px, env(safe-area-inset-bottom)); }
+.header { padding-top: max(12px, env(safe-area-inset-top)); }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo">⚡ STUDY OS</div>
+  <div class="header-right">
+    <div class="header-clock" id="topClock">00:00:00</div>
+    <div class="header-date" id="topDate"></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- TIMER CARD -->
+  <div class="timer-card">
+
+    <!-- Mode Pills -->
+    <div class="mode-pills">
+      <div class="pill active" onclick="setMode('focus')">🎯 Focus<br>25 min</div>
+      <div class="pill" onclick="setMode('short')">☕ Short<br>5 min</div>
+      <div class="pill" onclick="setMode('long')">🛌 Long<br>15 min</div>
+      <div class="pill" onclick="setMode('custom')">⚙️ Custom</div>
+    </div>
+
+    <!-- Custom Input -->
+    <div class="custom-row" id="customRow">
+      <input type="number" class="t-input" id="customMins" value="45" min="1" max="180" placeholder="Minutes">
+      <button class="t-add" onclick="applyCustom()">✓</button>
+    </div>
+
+    <!-- Ring -->
+    <div class="timer-wrap" id="timerWrap">
+      <svg class="ring-svg" viewBox="0 0 220 220">
+        <circle class="ring-bg"    cx="110" cy="110" r="100"/>
+        <circle class="ring-track" id="ringTrack" cx="110" cy="110" r="100"/>
+      </svg>
+      <div class="ring-inner">
+        <div class="timer-digits" id="timerDigits">25:00</div>
+        <div class="timer-mode-tag" id="timerModeTag">FOCUS</div>
+        <div class="timer-session" id="timerSessionInfo">Session #1</div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button class="btn-icon" onclick="resetTimer()">↺</button>
+      <button class="btn-play" id="playBtn" onclick="toggleTimer()">▶</button>
+      <button class="btn-icon" onclick="skipTimer()">⏭</button>
+    </div>
+
+    <!-- Topic Chip -->
+    <div class="topic-chip">
+      <span class="tc-label">Currently Studying</span>
+      <span class="tc-text" id="topicChipText">— tap a topic below —</span>
+    </div>
+
+  </div>
+
+  <!-- STATS -->
+  <div class="card">
+    <div class="card-title">📊 Today's Stats</div>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="stat-n" id="sPomodoros">0</div><div class="stat-l">🍅 Pomodoros</div></div>
+      <div class="stat-box"><div class="stat-n" id="sTime">0h 0m</div><div class="stat-l">⏱ Study Time</div></div>
+      <div class="stat-box"><div class="stat-n" id="sCheckins">0</div><div class="stat-l">✓ Check-ins</div></div>
+      <div class="stat-box"><div class="stat-n" id="sGoal">0%</div><div class="stat-l">🏆 Daily Goal</div></div>
+    </div>
+    <div style="margin-top:12px;">
+      <div class="prog-labels"><span>Daily Goal — 8 Pomodoros</span><span id="progPct">0 / 8</span></div>
+      <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
+    </div>
+  </div>
+
+  <!-- STREAK -->
+  <div class="card">
+    <div class="card-title">🔥 Check-in Streak</div>
+    <div class="streak-display">
+      <div class="streak-n" id="streakN">0</div>
+      <div class="streak-l">Confirmed In A Row</div>
+    </div>
+  </div>
+
+  <!-- TOPICS -->
+  <div class="card">
+    <div class="card-title">📋 Today's Topics</div>
+    <div class="topic-row">
+      <input class="t-input" id="tInput" placeholder="e.g. SA 240 Fraud..." onkeydown="if(event.key==='Enter') addTopic()">
+      <button class="t-add" onclick="addTopic()">+</button>
+    </div>
+    <div class="topics-ul" id="topicsList"></div>
+  </div>
+
+  <!-- SESSION LOG -->
+  <div class="card">
+    <div class="card-title">📝 Session Log</div>
+    <div class="log-ul" id="logUl">
+      <div class="log-row"><span class="log-t">--:--</span><span>App ready. Press ▶ to begin!</span></div>
+    </div>
+  </div>
+
+  <!-- QUOTE -->
+  <div class="quote-box" id="quoteBox"></div>
+
+  <!-- RESET -->
+  <button class="reset-btn" onclick="resetAll()">✕ Reset All Stats</button>
+
+</div>
+
+<!-- CHECK-IN POPUP -->
+<div class="overlay" id="checkOverlay">
+  <div class="popup">
+    <div class="popup-handle"></div>
+    <span class="popup-emoji" id="checkEmoji">💪</span>
+    <div class="popup-h">STILL STUDYING?</div>
+    <div class="popup-sub" id="checkMsg">Bhai aisehi pdhte rehna...</div>
+    <span class="popup-ca">Soon to be — CA Abhinav Agrawal</span>
+    <div class="popup-meta">Check-in streak: <b id="checkStreak">0</b> 🔥</div>
+    <button class="popup-cta" onclick="confirmCheckin()">✓ HAAN BHAI, PADH RAHA HOON!</button>
+  </div>
+</div>
+
+<!-- BREAK POPUP -->
+<div class="overlay" id="breakOverlay">
+  <div class="popup break-style">
+    <div class="popup-handle"></div>
+    <span class="popup-emoji">🎉</span>
+    <div class="popup-h">POMODORO DONE!</div>
+    <div class="popup-sub">Ek aur session complete!<br>Break lo — stretch, water, breathe. 💧</div>
+    <span class="popup-ca" style="background:linear-gradient(90deg,var(--green),#00a87a);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">CA Abhinav — You Earned This! 🏆</span>
+    <div class="popup-meta">Total Pomodoros: <b id="breakPomN">0</b></div>
+    <button class="popup-cta" onclick="endBreak()">✓ REFRESHED — BACK TO GRIND!</button>
+  </div>
+</div>
+
+<script>
+// ══ CONSTANTS ══
+const CIRC = 2 * Math.PI * 100; // r=100
+
+const MODES = {
+  focus:  { label:'FOCUS',       mins:25, color:'#f0b429' },
+  short:  { label:'SHORT BREAK', mins:5,  color:'#00dfa2' },
+  long:   { label:'LONG BREAK',  mins:15, color:'#3d8bff' },
+  custom: { label:'CUSTOM',      mins:45, color:'#f0b429' }
+};
+
+const MSGS = [
+  { e:'💪', m:"Bhai aisehi pdhte rehna... Don't repeat previous things!" },
+  { e:'🔥', m:'Ek aur pomodoro aur tu strong ho jayega, CA Abhinav!' },
+  { e:'📖', m:'Focus mat chhodna. Yeh waqt nahi milega dobara.' },
+  { e:'⚡', m:'Phone nahi — books. Audit master ban raha hai tu!' },
+  { e:'🏆', m:"Don't look back. Every minute counts. LOCKED IN!" },
+  { e:'🧠', m:'Consistency beats talent every time. Padhai karo!' },
+  { e:'🎯', m:"Ek din yeh sab rang layegi. Don't stop now!" },
+  { e:'💡', m:"You're building your future RIGHT NOW. Stay focused!" },
+  { e:'🚀', m:'Serious rehna bhai. CA Final exam door nahi hai!' },
+  { e:'⭐', m:"Tu kar sakta hai. Sirf padhai pe dhyan. Let's go!" },
+];
+
+const QUOTES = [
+  '"Success is the sum of small efforts, repeated day in and day out."',
+  '"The secret of getting ahead is getting started." — Mark Twain',
+  '"Audit karo, doubt mat karo." — CA Abhinav (future wisdom)',
+  '"Hard work beats talent when talent does not work hard."',
+  '"Every expert was once a beginner. Keep studying."',
+  '"CA nahi banana, banana hi hai — bas padhai karo!"',
+  '"One day at a time. One chapter at a time. One CA at a time."',
+];
+
+// ══ STATE ══
+let mode='focus', totalSecs=25*60, remainSecs=25*60;
+let running=false, timer=null, checkTimer=null;
+let pomCount=0, breakCount=0, checkinCount=0, streak=0;
+let studySecs=0, topicsDoneCount=0, sessionNum=1;
+let topics=[], activeTopicIdx=-1;
+
+// ══ CLOCK ══
+function tickClock() {
+  const n = new Date();
+  document.getElementById('topClock').textContent = n.toLocaleTimeString('en-IN',{hour12:false});
+  document.getElementById('topDate').textContent  = n.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+}
+setInterval(tickClock, 1000); tickClock();
+
+// ══ QUOTE ══
+document.getElementById('quoteBox').textContent = QUOTES[Math.floor(Math.random()*QUOTES.length)];
+
+// ══ MODE ══
+function setMode(m) {
+  if (running) return;
+  mode = m;
+  document.querySelectorAll('.pill').forEach((p,i) =>
+    p.classList.toggle('active', ['focus','short','long','custom'][i] === m));
+  document.getElementById('customRow').classList.toggle('show', m === 'custom');
+  if (m !== 'custom') {
+    totalSecs = MODES[m].mins * 60;
+    remainSecs = totalSecs;
+    updateRing();
+    document.getElementById('timerModeTag').textContent = MODES[m].label;
+    document.getElementById('ringTrack').style.stroke = MODES[m].color;
+    document.getElementById('timerDigits').style.color = '#fff';
+  }
+}
+
+function applyCustom() {
+  const v = Math.max(1, parseInt(document.getElementById('customMins').value) || 45);
+  MODES.custom.mins = v;
+  totalSecs = v * 60; remainSecs = totalSecs;
+  updateRing();
+  document.getElementById('timerModeTag').textContent = 'CUSTOM ' + v + 'M';
+}
+
+// ══ TIMER ══
+function toggleTimer() { running ? pause() : start(); }
+
+function start() {
+  running = true;
+  document.getElementById('playBtn').textContent = '⏸';
+  document.getElementById('timerWrap').classList.add('running-ring');
+  addLog('▶ Started ' + MODES[mode].label + (activeTopicIdx >= 0 ? ' — ' + topics[activeTopicIdx].name : ''));
+  timer = setInterval(() => {
+    if (remainSecs <= 0) { clearInterval(timer); clearTimeout(checkTimer); running = false; onEnd(); return; }
+    remainSecs--;
+    if (mode === 'focus') studySecs++;
+    updateRing(); updateStats();
+  }, 1000);
+  if (mode === 'focus') scheduleCheckin();
+}
+
+function pause() {
+  running = false; clearInterval(timer); clearTimeout(checkTimer);
+  document.getElementById('playBtn').textContent = '▶';
+  document.getElementById('timerWrap').classList.remove('running-ring');
+  addLog('⏸ Paused at ' + fmt(remainSecs));
+}
+
+function resetTimer() {
+  pause(); remainSecs = totalSecs; updateRing();
+  document.getElementById('timerDigits').style.color = '#fff';
+  document.getElementById('ringTrack').style.stroke = MODES[mode].color;
+}
+
+function skipTimer() { pause(); remainSecs = 0; updateRing(); onEnd(); }
+
+function onEnd() {
+  document.getElementById('playBtn').textContent = '▶';
+  document.getElementById('timerWrap').classList.remove('running-ring');
+  clearTimeout(checkTimer); beep();
+  if (mode === 'focus') {
+    pomCount++; sessionNum++;
+    addLog('✅ Pomodoro #' + pomCount + ' complete!');
+    document.getElementById('breakPomN').textContent = pomCount;
+    showBreakPopup();
+  } else {
+    breakCount++; addLog('☕ Break over. Back to focus!'); setMode('focus');
+  }
+  updateStats();
+}
+
+// ══ RING ══
+function updateRing() {
+  const pct    = remainSecs / totalSecs;
+  const offset = CIRC * (1 - pct);
+  document.getElementById('ringTrack').style.strokeDashoffset = offset;
+  document.getElementById('timerDigits').textContent = fmt(remainSecs);
+  document.getElementById('timerSessionInfo').textContent = 'Session #' + sessionNum;
+  if (remainSecs < 60 && mode === 'focus' && running) {
+    document.getElementById('ringTrack').style.stroke = '#ff3b55';
+    document.getElementById('timerDigits').style.color = '#ff3b55';
+  }
+}
+
+function fmt(s) {
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+
+// ══ STATS ══
+function updateStats() {
+  const h = Math.floor(studySecs/3600), m = Math.floor((studySecs%3600)/60);
+  const ts = h+'h '+m+'m';
+  const gp = Math.min(100, Math.round((pomCount/8)*100));
+  document.getElementById('sPomodoros').textContent = pomCount;
+  document.getElementById('sTime').textContent = ts;
+  document.getElementById('sCheckins').textContent = checkinCount;
+  document.getElementById('sGoal').textContent = gp + '%';
+  document.getElementById('streakN').textContent = streak;
+  document.getElementById('progFill').style.width = gp + '%';
+  document.getElementById('progPct').textContent = pomCount + ' / 8';
+}
+
+// ══ CHECK-IN (5 min popup) ══
+function scheduleCheckin() {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(() => {
+    if (running && mode === 'focus') { clearInterval(timer); showCheckPopup(); }
+  }, 5 * 60 * 1000);
+}
+
+function showCheckPopup() {
+  const msg = MSGS[Math.floor(Math.random() * MSGS.length)];
+  document.getElementById('checkEmoji').textContent = msg.e;
+  document.getElementById('checkMsg').textContent   = msg.m;
+  document.getElementById('checkStreak').textContent = streak;
+  document.getElementById('checkOverlay').classList.add('show');
+  beep(300);
+}
+
+function confirmCheckin() {
+  streak++; checkinCount++;
+  document.getElementById('checkOverlay').classList.remove('show');
+  addLog('✓ Check-in #' + checkinCount + ' confirmed! Streak: ' + streak + ' 🔥');
+  updateStats();
+  // resume timer
+  timer = setInterval(() => {
+    if (remainSecs <= 0) { clearInterval(timer); running = false; onEnd(); return; }
+    remainSecs--;
+    if (mode === 'focus') studySecs++;
+    updateRing(); updateStats();
+  }, 1000);
+  scheduleCheckin();
+}
+
+function showBreakPopup() { document.getElementById('breakOverlay').classList.add('show'); }
+function endBreak() {
+  document.getElementById('breakOverlay').classList.remove('show');
+  setMode('focus'); addLog('💪 Break done. Focus mode ready.');
+}
+
+// ══ TOPICS ══
+function addTopic() {
+  const v = document.getElementById('tInput').value.trim();
+  if (!v) return;
+  topics.push({ name: v, done: false });
+  document.getElementById('tInput').value = '';
+  renderTopics(); addLog('📋 Topic added: ' + v);
+}
+
+function renderTopics() {
+  const ul = document.getElementById('topicsList');
+  ul.innerHTML = '';
+  topics.forEach((t, i) => {
+    const d = document.createElement('div');
+    d.className = 't-item' + (i===activeTopicIdx?' active':'') + (t.done?' done':'');
+    d.innerHTML = `<div class="t-dot"></div>
+      <span style="flex:1" onclick="setActive(${i})">${t.name}</span>
+      <div class="t-acts">
+        <button class="t-btn" onclick="toggleDone(${i})">✓</button>
+        <button class="t-btn" onclick="delTopic(${i})" style="color:var(--red)">✕</button>
+      </div>`;
+    ul.appendChild(d);
+  });
+}
+
+function setActive(i) {
+  activeTopicIdx = i;
+  document.getElementById('topicChipText').textContent = topics[i].name;
+  renderTopics(); addLog('📖 Studying: ' + topics[i].name);
+}
+
+function toggleDone(i) {
+  topics[i].done = !topics[i].done;
+  if (topics[i].done) { topicsDoneCount++; addLog('✅ Done: ' + topics[i].name); }
+  renderTopics(); updateStats();
+}
+
+function delTopic(i) {
+  topics.splice(i, 1);
+  if (activeTopicIdx === i) { activeTopicIdx = -1; document.getElementById('topicChipText').textContent = '— tap a topic below —'; }
+  else if (activeTopicIdx > i) activeTopicIdx--;
+  renderTopics();
+}
+
+// ══ LOG ══
+function addLog(msg) {
+  const ul = document.getElementById('logUl'), n = new Date();
+  const t = n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
+  const row = document.createElement('div');
+  row.className = 'log-row';
+  row.innerHTML = `<span class="log-t">${t}</span><span>${msg}</span>`;
+  ul.insertBefore(row, ul.firstChild);
+  while (ul.children.length > 40) ul.removeChild(ul.lastChild);
+}
+
+// ══ BEEP ══
+function beep(freq=440) {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = freq; o.type = 'sine';
+    g.gain.setValueAtTime(0.3, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+    o.start(); o.stop(ctx.currentTime + 0.8);
+  } catch(e) {}
+}
+
+// ══ RESET ══
+function resetAll() {
+  if (!confirm("Reset all today's data?")) return;
+  pause();
+  pomCount=breakCount=checkinCount=streak=studySecs=topicsDoneCount=0;
+  sessionNum=1; remainSecs=totalSecs; topics=[]; activeTopicIdx=-1;
+  updateRing(); updateStats(); renderTopics();
+  document.getElementById('topicChipText').textContent = '— tap a topic below —';
+  document.getElementById('logUl').innerHTML = '<div class="log-row"><span class="log-t">--:--</span><span>Reset. Fresh start!</span></div>';
+}
+
+// ══ INIT ══
+document.getElementById('ringTrack').style.strokeDasharray  = CIRC;
+document.getElementById('ringTrack').style.strokeDashoffset = 0;
+updateRing(); updateStats();
+</script>
+
+<script>
+// ── Register Service Worker (enables offline + PWA install) ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('[PWA] Service Worker registered:', reg.scope))
+      .catch(err => console.log('[PWA] SW registration failed:', err));
+  });
+}
+
+// ── PWA Install Prompt ──
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Show install banner after 3 seconds if not already installed
+  setTimeout(() => {
+    if (deferredPrompt) showInstallBanner();
+  }, 3000);
+});
+
+function showInstallBanner() {
+  const banner = document.createElement('div');
+  banner.id = 'install-banner';
+  banner.innerHTML = `
+    <div style="position:fixed;bottom:20px;left:16px;right:16px;z-index:9999;
+      background:#12131f;border:1px solid #f0b429;border-radius:14px;
+      padding:14px 16px;display:flex;align-items:center;gap:12px;
+      box-shadow:0 0 30px rgba(240,180,41,0.25);">
+      <img src="icons/icon-72.png" style="width:44px;height:44px;border-radius:10px;">
+      <div style="flex:1;">
+        <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#f0b429;">Install Study OS</div>
+        <div style="font-family:'Syne',sans-serif;font-size:11px;color:#55577a;margin-top:2px;">Add to home screen for best experience</div>
+      </div>
+      <button onclick="installApp()" style="background:linear-gradient(135deg,#f0b429,#e07b00);border:none;color:#000;
+        font-family:'Syne',sans-serif;font-weight:800;font-size:12px;padding:8px 14px;
+        border-radius:8px;cursor:pointer;">INSTALL</button>
+      <button onclick="document.getElementById('install-banner').remove()" style="background:none;border:none;
+        color:#55577a;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
+    </div>`;
+  document.body.appendChild(banner);
+}
+
+async function installApp() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  console.log('[PWA] Install outcome:', outcome);
+  deferredPrompt = null;
+  const banner = document.getElementById('install-banner');
+  if (banner) banner.remove();
+}
+
+window.addEventListener('appinstalled', () => {
+  console.log('[PWA] App installed successfully!');
+  deferredPrompt = null;
+});
+</script>
+
+</body>
+</html>
