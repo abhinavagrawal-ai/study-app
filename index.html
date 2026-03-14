@@ -476,6 +476,51 @@ html, body {
 @keyframes ring-pulse { 0%,100%{filter:drop-shadow(0 0 8px var(--gold));}50%{filter:drop-shadow(0 0 18px var(--gold));} }
 .running-ring .ring-track { animation:ring-pulse 2s infinite; }
 
+/* ══ CHART ══ */
+.chart-toggle { display:flex; gap:6px; margin-bottom:12px; }
+.chart-toggle-btn {
+  flex:1; padding:7px 4px; border-radius:10px; border:1.5px solid var(--border);
+  background:var(--s3); color:var(--muted); font-family:'Syne',sans-serif;
+  font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase;
+  cursor:pointer; text-align:center; transition:all 0.2s;
+}
+.chart-toggle-btn.active { background:rgba(240,180,41,0.1); border-color:var(--gold); color:var(--gold); }
+
+.chart-wrap { position:relative; width:100%; }
+.chart-canvas { width:100%; height:160px; display:block; }
+
+.chart-legend { display:flex; justify-content:center; gap:16px; margin-top:8px; }
+.legend-item { display:flex; align-items:center; gap:5px; font-size:10px; font-weight:700; color:var(--muted); }
+.legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+.month-best {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px;
+}
+.best-box {
+  background:var(--s3); border:1px solid var(--border); border-radius:10px;
+  padding:9px 8px; text-align:center;
+}
+.best-n { font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--gold); line-height:1; }
+.best-l { font-size:9px; font-weight:700; letter-spacing:1px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+
+.heatmap-wrap { overflow-x:auto; padding-bottom:4px; }
+.heatmap-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; min-width:260px; }
+.heatmap-cell {
+  aspect-ratio:1; border-radius:4px; background:var(--s3);
+  border:1px solid var(--border); position:relative;
+  transition:transform 0.15s;
+}
+.heatmap-cell:active { transform:scale(0.9); }
+.heatmap-cell.l1 { background:#2a1f08; border-color:#3d2d0a; }
+.heatmap-cell.l2 { background:#6b4a0e; border-color:#8a600f; }
+.heatmap-cell.l3 { background:#b07a1a; border-color:#c98c1e; }
+.heatmap-cell.l4 { background:#f0b429; border-color:#f0b429; }
+.heatmap-cell.today-cell { box-shadow:0 0 0 2px var(--gold); }
+.heatmap-days { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; min-width:260px; margin-bottom:4px; }
+.heatmap-day-label { text-align:center; font-size:8px; font-weight:700; color:var(--muted); letter-spacing:1px; }
+.heatmap-legend { display:flex; align-items:center; gap:4px; margin-top:6px; font-size:9px; color:var(--muted); font-weight:700; }
+.heatmap-legend-cell { width:10px; height:10px; border-radius:2px; }
+
 /* ══ PROFILE SETTINGS ══ */
 .profile-row { display:flex; align-items:center; gap:12px; background:var(--s3); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
 .profile-avatar { width:44px; height:44px; border-radius:50%; background:linear-gradient(135deg,var(--gold),var(--gold2)); display:flex; align-items:center; justify-content:center; font-family:'Bebas Neue',sans-serif; font-size:20px; color:#000; flex-shrink:0; }
@@ -651,6 +696,50 @@ html, body {
     <!-- ═══ TAB 3: HISTORY ═══ -->
     <div class="tab-page" id="tab-history">
 
+      <!-- Monthly Chart Card -->
+      <div class="card">
+        <div class="card-title">📊 Study Statistics</div>
+
+        <!-- Toggle: Pomodoros vs Hours -->
+        <div class="chart-toggle">
+          <div class="chart-toggle-btn active" id="chartTogglePom" onclick="switchChart('pom')">🍅 Pomodoros</div>
+          <div class="chart-toggle-btn" id="chartToggleHrs" onclick="switchChart('hrs')">⏱ Hours</div>
+          <div class="chart-toggle-btn" id="chartToggle7" onclick="switchChartRange('7')">7 Days</div>
+          <div class="chart-toggle-btn active" id="chartToggle30" onclick="switchChartRange('30')">30 Days</div>
+        </div>
+
+        <!-- Canvas chart -->
+        <div class="chart-wrap">
+          <canvas class="chart-canvas" id="statsChart"></canvas>
+        </div>
+
+        <!-- Monthly best stats -->
+        <div class="month-best">
+          <div class="best-box"><div class="best-n" id="mBestDay">—</div><div class="best-l">🏆 Best Day</div></div>
+          <div class="best-box"><div class="best-n" id="mAvgPom">0</div><div class="best-l">📊 Avg/Day</div></div>
+          <div class="best-box"><div class="best-n" id="mStreak">0</div><div class="best-l">🔥 Best Streak</div></div>
+        </div>
+      </div>
+
+      <!-- Activity Heatmap -->
+      <div class="card">
+        <div class="card-title">🗓 Activity Heatmap — Last 28 Days</div>
+        <div class="heatmap-days" id="heatmapDayLabels"></div>
+        <div class="heatmap-wrap">
+          <div class="heatmap-grid" id="heatmapGrid"></div>
+        </div>
+        <div class="heatmap-legend">
+          <span>Less</span>
+          <div class="heatmap-legend-cell" style="background:var(--s3);border:1px solid var(--border);"></div>
+          <div class="heatmap-legend-cell" style="background:#2a1f08;"></div>
+          <div class="heatmap-legend-cell" style="background:#6b4a0e;"></div>
+          <div class="heatmap-legend-cell" style="background:#b07a1a;"></div>
+          <div class="heatmap-legend-cell" style="background:#f0b429;"></div>
+          <span>More</span>
+        </div>
+      </div>
+
+      <!-- Weekly Summary -->
       <div class="card">
         <div class="card-title">📅 This Week's Summary</div>
         <div class="week-summary">
@@ -942,7 +1031,11 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
   document.getElementById('nav-'+tab).classList.add('active');
-  if (tab==='history') renderWeekHistory();
+  if (tab==='history') {
+    renderWeekHistory();
+    // Use requestAnimationFrame so canvas has correct dimensions after display:flex kicks in
+    requestAnimationFrame(()=>{ drawChart(); drawHeatmap(); });
+  }
 }
 
 // ══════════════════════════════════════════
@@ -1455,6 +1548,190 @@ function clearHistory(){
 }
 
 // ══════════════════════════════════════════
+//  STUDY STATISTICS CHART
+// ══════════════════════════════════════════
+let chartMetric = 'pom';  // 'pom' or 'hrs'
+let chartRange  = 30;     // 7 or 30 days
+
+function switchChart(metric) {
+  chartMetric = metric;
+  document.getElementById('chartTogglePom').classList.toggle('active', metric==='pom');
+  document.getElementById('chartToggleHrs').classList.toggle('active', metric==='hrs');
+  drawChart();
+}
+
+function switchChartRange(days) {
+  chartRange = parseInt(days);
+  document.getElementById('chartToggle7').classList.toggle('active',  days==='7');
+  document.getElementById('chartToggle30').classList.toggle('active', days==='30');
+  drawChart();
+}
+
+function drawChart() {
+  const canvas = document.getElementById('statsChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const history = loadHistory();
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth, H = 160;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  // Build data array for last N days
+  const days = [];
+  const today = todayKey();
+  for (let i = chartRange-1; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const isToday = key === today;
+    const data = isToday
+      ? {pomodoros:pomCount, studySecs}
+      : (history[key] || {pomodoros:0, studySecs:0});
+    const val = chartMetric==='pom'
+      ? (data.pomodoros||0)
+      : Math.round((data.studySecs||0)/3600*10)/10;
+    days.push({key, val, d, isToday});
+  }
+
+  const maxVal = Math.max(1, ...days.map(d=>d.val), chartMetric==='pom'?dailyGoal:8);
+  const PAD_L=28, PAD_R=10, PAD_T=10, PAD_B=24;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+  const barW   = Math.max(2, (chartW / days.length) - 2);
+
+  ctx.clearRect(0,0,W,H);
+
+  // Grid lines
+  ctx.strokeStyle = '#252640';
+  ctx.lineWidth   = 0.5;
+  for (let i=0; i<=4; i++) {
+    const y = PAD_T + chartH - (chartH/4)*i;
+    ctx.beginPath(); ctx.moveTo(PAD_L,y); ctx.lineTo(W-PAD_R,y); ctx.stroke();
+    // Y axis labels
+    ctx.fillStyle = '#7b7ea8';
+    ctx.font = `${9*dpr/dpr}px sans-serif`;
+    ctx.textAlign = 'right';
+    const label = chartMetric==='pom'
+      ? Math.round(maxVal/4*i)
+      : (maxVal/4*i).toFixed(1);
+    ctx.fillText(label, PAD_L-4, y+3);
+  }
+
+  // Goal line (dashed)
+  const goalVal = chartMetric==='pom' ? dailyGoal : 8;
+  const goalY   = PAD_T + chartH - (goalVal/maxVal)*chartH;
+  ctx.strokeStyle = 'rgba(240,180,41,0.35)';
+  ctx.lineWidth   = 1;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(PAD_L,goalY); ctx.lineTo(W-PAD_R,goalY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Bars
+  days.forEach((day, i) => {
+    const x   = PAD_L + i * (chartW/days.length) + (chartW/days.length - barW)/2;
+    const barH = Math.max(2, (day.val/maxVal)*chartH);
+    const y    = PAD_T + chartH - barH;
+    // Color: gold if met goal, dimmer if not, bright gold if today
+    let color;
+    if (day.val === 0)          color = '#1a1b2e';
+    else if (day.isToday)       color = '#f0b429';
+    else if (day.val >= goalVal) color = '#c98c1e';
+    else                        color = '#4a3510';
+
+    ctx.fillStyle = color;
+    const r = Math.min(3, barW/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.lineTo(x+barW-r,y);
+    ctx.quadraticCurveTo(x+barW,y,x+barW,y+r);
+    ctx.lineTo(x+barW,y+barH);
+    ctx.lineTo(x,y+barH);
+    ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y);
+    ctx.fill();
+
+    // X axis labels — show every Nth day
+    const showEvery = chartRange<=7 ? 1 : chartRange<=14 ? 2 : 5;
+    if (i % showEvery === 0 || day.isToday) {
+      ctx.fillStyle = day.isToday ? '#f0b429' : '#7b7ea8';
+      ctx.font = `${8}px sans-serif`;
+      ctx.textAlign = 'center';
+      const label = day.isToday ? 'Today' : `${day.d.getDate()}`;
+      ctx.fillText(label, x + barW/2, H - PAD_B + 12);
+    }
+  });
+
+  // Value label on tallest bar (today)
+  const todayDay = days.find(d=>d.isToday);
+  if (todayDay && todayDay.val > 0) {
+    const i   = days.indexOf(todayDay);
+    const x   = PAD_L + i*(chartW/days.length) + (chartW/days.length)/2;
+    const barH = (todayDay.val/maxVal)*chartH;
+    const y    = PAD_T + chartH - barH - 5;
+    ctx.fillStyle = '#f0b429';
+    ctx.font = `bold ${9}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(chartMetric==='pom' ? todayDay.val : todayDay.val+'h', x, y);
+  }
+
+  // Month-best stats
+  const allVals = days.filter(d=>d.val>0);
+  if (allVals.length > 0) {
+    const best    = allVals.reduce((a,b)=>a.val>b.val?a:b);
+    const bestDate= new Date(best.key);
+    const DAYS    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    document.getElementById('mBestDay').textContent  = DAYS[bestDate.getDay()];
+    document.getElementById('mAvgPom').textContent   = (allVals.reduce((s,d)=>s+d.val,0)/allVals.length).toFixed(1);
+  }
+
+  // Best streak calculation
+  let bestStreak=0, cur=0;
+  days.forEach(d=>{ if(d.val>0){cur++;bestStreak=Math.max(bestStreak,cur);}else{cur=0;} });
+  document.getElementById('mStreak').textContent = bestStreak;
+}
+
+// ══ HEATMAP ══
+function drawHeatmap() {
+  const history = loadHistory();
+  const today   = todayKey();
+  const DAYS    = ['S','M','T','W','T','F','S'];
+
+  // Day labels
+  const labelsEl = document.getElementById('heatmapDayLabels');
+  labelsEl.innerHTML = DAYS.map(d=>`<div class="heatmap-day-label">${d}</div>`).join('');
+
+  const grid = document.getElementById('heatmapGrid');
+  grid.innerHTML = '';
+
+  // Build 28 days
+  const cells = [];
+  for (let i=27; i>=0; i--) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const isToday = key===today;
+    const data  = isToday ? {pomodoros:pomCount} : (history[key]||{pomodoros:0});
+    const poms  = data.pomodoros||0;
+    cells.push({key,poms,isToday,d});
+  }
+
+  // Max for scaling
+  const maxPoms = Math.max(1,...cells.map(c=>c.poms));
+
+  cells.forEach(c => {
+    const el  = document.createElement('div');
+    let level = '';
+    if      (c.poms===0)              level = '';
+    else if (c.poms<maxPoms*0.25)     level = 'l1';
+    else if (c.poms<maxPoms*0.5)      level = 'l2';
+    else if (c.poms<maxPoms*0.75)     level = 'l3';
+    else                              level = 'l4';
+    el.className = `heatmap-cell ${level} ${c.isToday?'today-cell':''}`;
+    el.title     = `${c.d.toDateString()}: ${c.poms} pomodoros`;
+    grid.appendChild(el);
+  });
+}
+
+// ══════════════════════════════════════════
 //  EXPORT CSV
 // ══════════════════════════════════════════
 function exportCSV() {
@@ -1555,6 +1832,13 @@ if(running){
 }
 
 updateRing();updateStats();
+
+// Redraw chart on resize/orientation change
+window.addEventListener('resize', ()=>{
+  if (document.getElementById('tab-history').classList.contains('active')) {
+    requestAnimationFrame(()=>{ drawChart(); drawHeatmap(); });
+  }
+});
 </script>
 </body>
 </html>
