@@ -23,7 +23,7 @@
   --green:  #00dfa2;
   --blue:   #3d8bff;
   --text:   #dde0f0;
-  --muted:  #55577a;
+  --muted:  #7b7ea8;
   --radius: 16px;
 }
 
@@ -700,7 +700,7 @@ html, body {
       <!-- Daily goal -->
       <div class="card">
         <div class="card-title">🎯 Daily Goal</div>
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
           <span style="font-size:12px;font-weight:700;color:var(--muted);">Target Pomodoros:</span>
           <select id="dailyGoalSelect" onchange="setDailyGoal(this.value)" style="background:var(--s3);border:1px solid var(--border);color:var(--text);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;padding:7px 12px;border-radius:10px;outline:none;flex:1;">
             <option value="4">4 Pomodoros (Easy)</option>
@@ -710,12 +710,23 @@ html, body {
             <option value="12">12 Pomodoros (Intense)</option>
           </select>
         </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text);">🔔 Minute Tick Sound</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px;">Soft tick every minute while studying</div>
+          </div>
+          <label style="display:flex;align-items:center;cursor:pointer;">
+            <input type="checkbox" id="tickToggle" checked onchange="tickEnabled=this.checked"
+              style="width:18px;height:18px;accent-color:var(--gold);cursor:pointer;">
+          </label>
+        </div>
       </div>
 
       <!-- Reset -->
       <div class="card">
         <div class="card-title">⚠️ Data</div>
         <div style="display:flex;flex-direction:column;gap:8px;">
+          <button class="reset-btn" style="color:var(--green);border-color:var(--green);" onclick="exportCSV()">📥 Export History as CSV</button>
           <button class="reset-btn" onclick="resetAll()">✕ Reset Today's Stats</button>
           <button class="reset-btn" style="color:var(--muted);" onclick="clearHistory()">🗑 Clear All History</button>
         </div>
@@ -1047,6 +1058,8 @@ function start() {
     remainSecs=Math.max(0,remainAtStart-elapsed);
     if (mode==='focus') studySecs=Math.min(studySecs+1,studySecs+elapsed);
     if (remainSecs<=0){clearInterval(ticker);running=false;timerStartedAt=null;onEnd();return;}
+    // Soft tick every 60 seconds as a gentle reminder
+    if (remainSecs%60===0 && remainSecs>0 && mode==='focus') playTick();
     updateRing(); updateStats(); saveState();
     if (mode==='focus'&&checkinStartedAt) {
       const sinceCheckin=(Date.now()-checkinStartedAt)/1000/60;
@@ -1074,7 +1087,7 @@ function skipTimer(){pause();remainSecs=0;updateRing();onEnd();}
 function onEnd() {
   document.getElementById('playBtn').textContent='▶';
   document.getElementById('timerWrap').classList.remove('running-ring');
-  beep();
+  playGong(); // 🔔 gong on session complete
   if (mode==='focus') {
     pomCount++; sessionNum++;
     addLog('✅ Pomodoro #'+pomCount+' complete!');
@@ -1277,18 +1290,74 @@ function addLog(msg) {
 }
 
 // ══════════════════════════════════════════
-//  BEEP
+//  AUDIO SYSTEM
 // ══════════════════════════════════════════
-function beep(freq=440){
-  try{
-    const ctx=new(window.AudioContext||window.webkitAudioContext)();
-    const o=ctx.createOscillator(),g=ctx.createGain();
-    o.connect(g);g.connect(ctx.destination);
-    o.frequency.value=freq;o.type='sine';
+let audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// Simple beep (check-in popup)
+function beep(freq=440) {
+  try {
+    const ctx=getAudioCtx();
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value=freq; o.type='sine';
     g.gain.setValueAtTime(0.3,ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.8);
-    o.start();o.stop(ctx.currentTime+0.8);
-  }catch(e){}
+    o.start(); o.stop(ctx.currentTime+0.8);
+  } catch(e){}
+}
+
+// Gong sound — session complete 🎉
+function playGong() {
+  try {
+    const ctx=getAudioCtx();
+    const now=ctx.currentTime;
+    // Low fundamental
+    const o1=ctx.createOscillator(), g1=ctx.createGain();
+    o1.type='sine'; o1.frequency.value=180;
+    g1.gain.setValueAtTime(0,now);
+    g1.gain.linearRampToValueAtTime(0.5,now+0.02);
+    g1.gain.exponentialRampToValueAtTime(0.001,now+3.5);
+    o1.connect(g1); g1.connect(ctx.destination);
+    o1.start(now); o1.stop(now+3.5);
+    // High harmonic
+    const o2=ctx.createOscillator(), g2=ctx.createGain();
+    o2.type='sine'; o2.frequency.value=520;
+    g2.gain.setValueAtTime(0,now);
+    g2.gain.linearRampToValueAtTime(0.25,now+0.01);
+    g2.gain.exponentialRampToValueAtTime(0.001,now+2.0);
+    o2.connect(g2); g2.connect(ctx.destination);
+    o2.start(now); o2.stop(now+2.0);
+    // Shimmer
+    const o3=ctx.createOscillator(), g3=ctx.createGain();
+    o3.type='triangle'; o3.frequency.value=860;
+    g3.gain.setValueAtTime(0,now);
+    g3.gain.linearRampToValueAtTime(0.12,now+0.01);
+    g3.gain.exponentialRampToValueAtTime(0.001,now+1.2);
+    o3.connect(g3); g3.connect(ctx.destination);
+    o3.start(now); o3.stop(now+1.2);
+  } catch(e){}
+}
+
+// Soft tick — every second while running
+let tickEnabled = true;
+function playTick() {
+  if (!tickEnabled) return;
+  try {
+    const ctx=getAudioCtx();
+    const buf=ctx.createBuffer(1,ctx.sampleRate*0.02,ctx.sampleRate);
+    const data=buf.getChannelData(0);
+    for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*Math.exp(-i/(ctx.sampleRate*0.005));
+    const src=ctx.createBufferSource(), g=ctx.createGain();
+    src.buffer=buf; g.gain.value=0.06;
+    src.connect(g); g.connect(ctx.destination);
+    src.start();
+  } catch(e){}
 }
 
 // ══════════════════════════════════════════
@@ -1383,6 +1452,54 @@ function clearHistory(){
   try{localStorage.removeItem(HISTORY_KEY);localStorage.removeItem(SK);}catch(e){}
   resetAll();
   alert('All history cleared!');
+}
+
+// ══════════════════════════════════════════
+//  EXPORT CSV
+// ══════════════════════════════════════════
+function exportCSV() {
+  const history = loadHistory();
+  const rows = [
+    ['Date','Day','Pomodoros','Study Time (mins)','Check-ins','Topics Done','Topics Total','Topics List']
+  ];
+  const DAY = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const keys = Object.keys(history).sort();
+  if (keys.length === 0) { alert('No history to export yet! Study for a few days first.'); return; }
+  keys.forEach(k => {
+    const d = history[k];
+    const dt = new Date(k);
+    const topicsArr = d.topics || [];
+    const done = topicsArr.filter(t=>t.done).length;
+    const topicNames = topicsArr.map(t=>(t.done?'✓ ':'')+t.name).join(' | ');
+    const studyMins = Math.round((d.studySecs||0)/60);
+    rows.push([
+      k,
+      DAY[dt.getDay()],
+      d.pomodoros||0,
+      studyMins,
+      d.checkins||0,
+      done,
+      topicsArr.length,
+      `"${topicNames}"`
+    ]);
+  });
+  // Add summary row
+  const totalPoms = keys.reduce((s,k)=>s+(history[k].pomodoros||0),0);
+  const totalMins = keys.reduce((s,k)=>s+Math.round((history[k].studySecs||0)/60),0);
+  rows.push([]);
+  rows.push(['TOTAL','',totalPoms,totalMins,'','','','']);
+
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `StudyHistory_${userName||'User'}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  addLog('📥 History exported as CSV!');
 }
 
 // ══════════════════════════════════════════
