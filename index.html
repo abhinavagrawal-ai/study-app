@@ -5,23 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Study OS">
-<!-- PWA Manifest -->
-<link rel="manifest" href="manifest.json">
-
-<!-- Theme color for Android Chrome toolbar -->
-<meta name="theme-color" content="#f0b429">
-<meta name="mobile-web-app-capable" content="yes">
-
-<!-- App icons for Android -->
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
-<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-
-<!-- Apple touch icons (iOS) -->
-<link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
-<link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
-
-<title>CA Abhinav — Study OS</title>
+<meta name="apple-mobile-web-app-title" content="Pomodoro - The Tracker">
+<title>Pomodoro - The Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -614,13 +599,65 @@ html, body {
 /* safe area for iPhone notch */
 .main { padding-bottom: max(40px, env(safe-area-inset-bottom)); }
 .header { padding-top: max(12px, env(safe-area-inset-top)); }
+
+/* ── WAKEUP INTERVAL SELECTOR ── */
+.interval-pills {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+.int-pill {
+  background: var(--s3);
+  border: 2px solid var(--border);
+  color: var(--muted);
+  font-family: 'Syne', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 10px 4px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.int-pill.active {
+  background: rgba(240,180,41,0.12);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.int-pill span {
+  display: block;
+  font-size: 20px;
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.interval-custom-row {
+  display: none;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+.interval-custom-row.show { display: flex; }
+.int-status {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.int-status b { color: var(--gold); }
 </style>
 </head>
 <body>
 
 <!-- HEADER -->
 <div class="header">
-  <div class="logo">⚡ STUDY OS</div>
+  <div class="logo">🍅 POMODORO - THE TRACKER</div>
   <div class="header-right">
     <div class="header-clock" id="topClock">00:00:00</div>
     <div class="header-date" id="topDate"></div>
@@ -687,6 +724,35 @@ html, body {
       <div class="prog-labels"><span>Daily Goal — 8 Pomodoros</span><span id="progPct">0 / 8</span></div>
       <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
     </div>
+  </div>
+
+  <!-- WAKEUP INTERVAL -->
+  <div class="card">
+    <div class="card-title">⏰ Wakeup Notification Every</div>
+    <div class="interval-pills">
+      <div class="int-pill" onclick="setInterval_('5')">
+        <span>5</span>mins
+      </div>
+      <div class="int-pill active" onclick="setInterval_('10')">
+        <span>10</span>mins
+      </div>
+      <div class="int-pill" onclick="setInterval_('15')">
+        <span>15</span>mins
+      </div>
+      <div class="int-pill" onclick="setInterval_('20')">
+        <span>20</span>mins
+      </div>
+      <div class="int-pill" onclick="setInterval_('custom')">
+        <span>✏️</span>custom
+      </div>
+    </div>
+    <!-- Custom interval row -->
+    <div class="interval-custom-row" id="intervalCustomRow">
+      <input type="number" class="t-input" id="customInterval" placeholder="e.g. 7" min="1" max="60" style="flex:1;">
+      <span style="color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap;">mins</span>
+      <button class="t-add" onclick="applyCustomInterval()" style="width:44px;">✓</button>
+    </div>
+    <div class="int-status" id="intStatus">Popup every <b>10 mins</b> during focus</div>
   </div>
 
   <!-- STREAK -->
@@ -905,12 +971,41 @@ function updateStats() {
   document.getElementById('progPct').textContent = pomCount + ' / 8';
 }
 
-// ══ CHECK-IN (5 min popup) ══
+// ══ WAKEUP INTERVAL ══
+let wakeupMins = 10; // default 10 mins
+
+function setInterval_(mins) {
+  if (mins === 'custom') {
+    document.getElementById('intervalCustomRow').classList.add('show');
+    document.querySelectorAll('.int-pill').forEach((p,i) => p.classList.toggle('active', i===4));
+    return;
+  }
+  document.getElementById('intervalCustomRow').classList.remove('show');
+  wakeupMins = parseInt(mins);
+  document.querySelectorAll('.int-pill').forEach((p, i) => {
+    p.classList.toggle('active', ['5','10','15','20'][i] === mins);
+  });
+  document.getElementById('intStatus').innerHTML = `Popup every <b>${wakeupMins} mins</b> during focus`;
+  addLog(`⏰ Wakeup interval set to ${wakeupMins} mins`);
+  if (running && mode === 'focus') scheduleCheckin();
+}
+
+function applyCustomInterval() {
+  const v = Math.max(1, Math.min(60, parseInt(document.getElementById('customInterval').value) || 10));
+  wakeupMins = v;
+  document.getElementById('intStatus').innerHTML = `Popup every <b>${v} mins</b> during focus`;
+  document.getElementById('intervalCustomRow').classList.remove('show');
+  document.getElementById('customInterval').value = '';
+  addLog(`⏰ Wakeup interval set to ${v} mins`);
+  if (running && mode === 'focus') scheduleCheckin();
+}
+
+// ══ CHECK-IN (user-selected interval popup) ══
 function scheduleCheckin() {
   clearTimeout(checkTimer);
   checkTimer = setTimeout(() => {
     if (running && mode === 'focus') { clearInterval(timer); showCheckPopup(); }
-  }, 5 * 60 * 1000);
+  }, wakeupMins * 60 * 1000);
 }
 
 function showCheckPopup() {
@@ -1027,65 +1122,5 @@ document.getElementById('ringTrack').style.strokeDasharray  = CIRC;
 document.getElementById('ringTrack').style.strokeDashoffset = 0;
 updateRing(); updateStats();
 </script>
-
-<script>
-// ── Register Service Worker (enables offline + PWA install) ──
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => console.log('[PWA] Service Worker registered:', reg.scope))
-      .catch(err => console.log('[PWA] SW registration failed:', err));
-  });
-}
-
-// ── PWA Install Prompt ──
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  deferredPrompt = e;
-  // Show install banner after 3 seconds if not already installed
-  setTimeout(() => {
-    if (deferredPrompt) showInstallBanner();
-  }, 3000);
-});
-
-function showInstallBanner() {
-  const banner = document.createElement('div');
-  banner.id = 'install-banner';
-  banner.innerHTML = `
-    <div style="position:fixed;bottom:20px;left:16px;right:16px;z-index:9999;
-      background:#12131f;border:1px solid #f0b429;border-radius:14px;
-      padding:14px 16px;display:flex;align-items:center;gap:12px;
-      box-shadow:0 0 30px rgba(240,180,41,0.25);">
-      <img src="icons/icon-72.png" style="width:44px;height:44px;border-radius:10px;">
-      <div style="flex:1;">
-        <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#f0b429;">Install Study OS</div>
-        <div style="font-family:'Syne',sans-serif;font-size:11px;color:#55577a;margin-top:2px;">Add to home screen for best experience</div>
-      </div>
-      <button onclick="installApp()" style="background:linear-gradient(135deg,#f0b429,#e07b00);border:none;color:#000;
-        font-family:'Syne',sans-serif;font-weight:800;font-size:12px;padding:8px 14px;
-        border-radius:8px;cursor:pointer;">INSTALL</button>
-      <button onclick="document.getElementById('install-banner').remove()" style="background:none;border:none;
-        color:#55577a;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
-    </div>`;
-  document.body.appendChild(banner);
-}
-
-async function installApp() {
-  if (!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  console.log('[PWA] Install outcome:', outcome);
-  deferredPrompt = null;
-  const banner = document.getElementById('install-banner');
-  if (banner) banner.remove();
-}
-
-window.addEventListener('appinstalled', () => {
-  console.log('[PWA] App installed successfully!');
-  deferredPrompt = null;
-});
-</script>
-
 </body>
 </html>
