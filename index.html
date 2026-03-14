@@ -818,7 +818,8 @@ html, body {
 
 <script>
 // ══ CONSTANTS ══
-const CIRC = 2 * Math.PI * 100; // r=100
+const CIRC = 2 * Math.PI * 100;
+const SK   = 'pomodoroTracker_v1'; // localStorage key
 
 const MODES = {
   focus:  { label:'FOCUS',       mins:25, color:'#f0b429' },
@@ -852,10 +853,72 @@ const QUOTES = [
 
 // ══ STATE ══
 let mode='focus', totalSecs=25*60, remainSecs=25*60;
-let running=false, timer=null, checkTimer=null;
+let running=false, ticker=null, checkTimer=null;
 let pomCount=0, breakCount=0, checkinCount=0, streak=0;
 let studySecs=0, topicsDoneCount=0, sessionNum=1;
-let topics=[], activeTopicIdx=-1;
+let topics=[], activeTopicIdx=-1, wakeupMins=10;
+
+// ── TIMESTAMP-BASED TIMER (works even when tab is hidden) ──
+let timerStartedAt = null;   // Date.now() when timer was last started
+let remainAtStart  = 0;      // remainSecs at that moment
+let checkinStartedAt = null; // Date.now() when checkin countdown started
+
+// ══ SAVE / LOAD (localStorage — survives refresh) ══
+function saveState() {
+  const snap = {
+    mode, totalSecs, remainSecs, running,
+    pomCount, breakCount, checkinCount, streak,
+    studySecs, topicsDoneCount, sessionNum,
+    topics, activeTopicIdx, wakeupMins,
+    timerStartedAt, remainAtStart, checkinStartedAt,
+    savedAt: Date.now()
+  };
+  try { localStorage.setItem(SK, JSON.stringify(snap)); } catch(e){}
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SK);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+
+    // If saved date is different from today → reset stats but keep topics
+    const savedDate = new Date(s.savedAt).toDateString();
+    const today     = new Date().toDateString();
+    if (savedDate !== today) {
+      // New day — keep topics, reset everything else
+      topics = s.topics || [];
+      return false;
+    }
+
+    mode           = s.mode       || 'focus';
+    totalSecs      = s.totalSecs  || 25*60;
+    remainSecs     = s.remainSecs || 25*60;
+    running        = s.running    || false;
+    pomCount       = s.pomCount   || 0;
+    breakCount     = s.breakCount || 0;
+    checkinCount   = s.checkinCount || 0;
+    streak         = s.streak     || 0;
+    studySecs      = s.studySecs  || 0;
+    topicsDoneCount= s.topicsDoneCount || 0;
+    sessionNum     = s.sessionNum || 1;
+    topics         = s.topics     || [];
+    activeTopicIdx = s.activeTopicIdx !== undefined ? s.activeTopicIdx : -1;
+    wakeupMins     = s.wakeupMins || 10;
+    timerStartedAt = s.timerStartedAt || null;
+    remainAtStart  = s.remainAtStart  || 0;
+    checkinStartedAt = s.checkinStartedAt || null;
+
+    // If was running when saved → calculate how much time passed
+    if (running && timerStartedAt) {
+      const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+      remainSecs = Math.max(0, remainAtStart - elapsed);
+      if (mode === 'focus') studySecs += Math.min(elapsed, remainAtStart);
+    }
+
+    return true;
+  } catch(e) { return false; }
+}
 
 // ══ CLOCK ══
 function tickClock() {
@@ -883,6 +946,7 @@ function setMode(m) {
     document.getElementById('ringTrack').style.stroke = MODES[m].color;
     document.getElementById('timerDigits').style.color = '#fff';
   }
+  saveState();
 }
 
 function applyCustom() {
@@ -891,36 +955,67 @@ function applyCustom() {
   totalSecs = v * 60; remainSecs = totalSecs;
   updateRing();
   document.getElementById('timerModeTag').textContent = 'CUSTOM ' + v + 'M';
+  saveState();
 }
 
-// ══ TIMER ══
+// ══ TIMER (timestamp-based) ══
 function toggleTimer() { running ? pause() : start(); }
 
 function start() {
-  running = true;
+  running          = true;
+  timerStartedAt   = Date.now();
+  remainAtStart    = remainSecs;
+  checkinStartedAt = Date.now();
   document.getElementById('playBtn').textContent = '⏸';
   document.getElementById('timerWrap').classList.add('running-ring');
   addLog('▶ Started ' + MODES[mode].label + (activeTopicIdx >= 0 ? ' — ' + topics[activeTopicIdx].name : ''));
-  timer = setInterval(() => {
-    if (remainSecs <= 0) { clearInterval(timer); clearTimeout(checkTimer); running = false; onEnd(); return; }
-    remainSecs--;
-    if (mode === 'focus') studySecs++;
-    updateRing(); updateStats();
+
+  ticker = setInterval(() => {
+    // Calculate remaining using timestamps — accurate even after tab sleep
+    const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    remainSecs = Math.max(0, remainAtStart - elapsed);
+    if (mode === 'focus') studySecs = (studySecs - (studySecs % 1)) + elapsed > studySecs
+      ? studySecs + 1 : studySecs; // increment each tick
+
+    if (remainSecs <= 0) {
+      clearInterval(ticker);
+      clearTimeout(checkTimer);
+      running = false;
+      timerStartedAt = null;
+      onEnd();
+      return;
+    }
+    updateRing(); updateStats(); saveState();
+
+    // Check wakeup — using timestamp
+    if (mode === 'focus' && checkinStartedAt) {
+      const sinceCheckin = (Date.now() - checkinStartedAt) / 1000 / 60;
+      if (sinceCheckin >= wakeupMins) {
+        checkinStartedAt = null;
+        clearInterval(ticker);
+        showCheckPopup();
+      }
+    }
   }, 1000);
-  if (mode === 'focus') scheduleCheckin();
 }
 
 function pause() {
-  running = false; clearInterval(timer); clearTimeout(checkTimer);
+  running = false;
+  clearInterval(ticker);
+  clearTimeout(checkTimer);
+  timerStartedAt   = null;
+  checkinStartedAt = null;
   document.getElementById('playBtn').textContent = '▶';
   document.getElementById('timerWrap').classList.remove('running-ring');
   addLog('⏸ Paused at ' + fmt(remainSecs));
+  saveState();
 }
 
 function resetTimer() {
   pause(); remainSecs = totalSecs; updateRing();
   document.getElementById('timerDigits').style.color = '#fff';
   document.getElementById('ringTrack').style.stroke = MODES[mode].color;
+  saveState();
 }
 
 function skipTimer() { pause(); remainSecs = 0; updateRing(); onEnd(); }
@@ -928,7 +1023,7 @@ function skipTimer() { pause(); remainSecs = 0; updateRing(); onEnd(); }
 function onEnd() {
   document.getElementById('playBtn').textContent = '▶';
   document.getElementById('timerWrap').classList.remove('running-ring');
-  clearTimeout(checkTimer); beep();
+  beep();
   if (mode === 'focus') {
     pomCount++; sessionNum++;
     addLog('✅ Pomodoro #' + pomCount + ' complete!');
@@ -937,8 +1032,41 @@ function onEnd() {
   } else {
     breakCount++; addLog('☕ Break over. Back to focus!'); setMode('focus');
   }
-  updateStats();
+  updateStats(); saveState();
 }
+
+// ══ PAGE VISIBILITY — catch tab switch / screen off ══
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // Tab going to background — save current state with timestamp
+    saveState();
+  } else {
+    // Tab coming back to foreground
+    if (running && timerStartedAt) {
+      // Recalculate elapsed time
+      const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+      remainSecs = Math.max(0, remainAtStart - elapsed);
+      if (remainSecs <= 0) {
+        clearInterval(ticker);
+        running = false;
+        timerStartedAt = null;
+        onEnd();
+        return;
+      }
+      // Check if wakeup popup is due
+      if (mode === 'focus' && checkinStartedAt) {
+        const sinceCheckin = (Date.now() - checkinStartedAt) / 1000 / 60;
+        if (sinceCheckin >= wakeupMins) {
+          checkinStartedAt = null;
+          clearInterval(ticker);
+          showCheckPopup();
+          return;
+        }
+      }
+      updateRing(); updateStats();
+    }
+  }
+});
 
 // ══ RING ══
 function updateRing() {
@@ -960,10 +1088,9 @@ function fmt(s) {
 // ══ STATS ══
 function updateStats() {
   const h = Math.floor(studySecs/3600), m = Math.floor((studySecs%3600)/60);
-  const ts = h+'h '+m+'m';
   const gp = Math.min(100, Math.round((pomCount/8)*100));
   document.getElementById('sPomodoros').textContent = pomCount;
-  document.getElementById('sTime').textContent = ts;
+  document.getElementById('sTime').textContent = h+'h '+m+'m';
   document.getElementById('sCheckins').textContent = checkinCount;
   document.getElementById('sGoal').textContent = gp + '%';
   document.getElementById('streakN').textContent = streak;
@@ -972,8 +1099,6 @@ function updateStats() {
 }
 
 // ══ WAKEUP INTERVAL ══
-let wakeupMins = 10; // default 10 mins
-
 function setInterval_(mins) {
   if (mins === 'custom') {
     document.getElementById('intervalCustomRow').classList.add('show');
@@ -987,7 +1112,8 @@ function setInterval_(mins) {
   });
   document.getElementById('intStatus').innerHTML = `Popup every <b>${wakeupMins} mins</b> during focus`;
   addLog(`⏰ Wakeup interval set to ${wakeupMins} mins`);
-  if (running && mode === 'focus') scheduleCheckin();
+  if (running && mode === 'focus') checkinStartedAt = Date.now();
+  saveState();
 }
 
 function applyCustomInterval() {
@@ -997,17 +1123,13 @@ function applyCustomInterval() {
   document.getElementById('intervalCustomRow').classList.remove('show');
   document.getElementById('customInterval').value = '';
   addLog(`⏰ Wakeup interval set to ${v} mins`);
-  if (running && mode === 'focus') scheduleCheckin();
+  if (running && mode === 'focus') checkinStartedAt = Date.now();
+  saveState();
 }
 
-// ══ CHECK-IN (user-selected interval popup) ══
-function scheduleCheckin() {
-  clearTimeout(checkTimer);
-  checkTimer = setTimeout(() => {
-    if (running && mode === 'focus') { clearInterval(timer); showCheckPopup(); }
-  }, wakeupMins * 60 * 1000);
-}
+function scheduleCheckin() { checkinStartedAt = Date.now(); }
 
+// ══ POPUPS ══
 function showCheckPopup() {
   const msg = MSGS[Math.floor(Math.random() * MSGS.length)];
   document.getElementById('checkEmoji').textContent = msg.e;
@@ -1022,14 +1144,24 @@ function confirmCheckin() {
   document.getElementById('checkOverlay').classList.remove('show');
   addLog('✓ Check-in #' + checkinCount + ' confirmed! Streak: ' + streak + ' 🔥');
   updateStats();
-  // resume timer
-  timer = setInterval(() => {
-    if (remainSecs <= 0) { clearInterval(timer); running = false; onEnd(); return; }
-    remainSecs--;
-    if (mode === 'focus') studySecs++;
-    updateRing(); updateStats();
+  // Resume timer from where it left off
+  timerStartedAt   = Date.now();
+  remainAtStart    = remainSecs;
+  checkinStartedAt = Date.now();
+  running = true;
+  document.getElementById('playBtn').textContent = '⏸';
+  document.getElementById('timerWrap').classList.add('running-ring');
+  ticker = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    remainSecs = Math.max(0, remainAtStart - elapsed);
+    if (remainSecs <= 0) { clearInterval(ticker); running = false; timerStartedAt = null; onEnd(); return; }
+    updateRing(); updateStats(); saveState();
+    if (mode === 'focus' && checkinStartedAt) {
+      const sinceCheckin = (Date.now() - checkinStartedAt) / 1000 / 60;
+      if (sinceCheckin >= wakeupMins) { checkinStartedAt = null; clearInterval(ticker); showCheckPopup(); }
+    }
   }, 1000);
-  scheduleCheckin();
+  saveState();
 }
 
 function showBreakPopup() { document.getElementById('breakOverlay').classList.add('show'); }
@@ -1044,7 +1176,7 @@ function addTopic() {
   if (!v) return;
   topics.push({ name: v, done: false });
   document.getElementById('tInput').value = '';
-  renderTopics(); addLog('📋 Topic added: ' + v);
+  renderTopics(); addLog('📋 Topic added: ' + v); saveState();
 }
 
 function renderTopics() {
@@ -1066,20 +1198,20 @@ function renderTopics() {
 function setActive(i) {
   activeTopicIdx = i;
   document.getElementById('topicChipText').textContent = topics[i].name;
-  renderTopics(); addLog('📖 Studying: ' + topics[i].name);
+  renderTopics(); addLog('📖 Studying: ' + topics[i].name); saveState();
 }
 
 function toggleDone(i) {
   topics[i].done = !topics[i].done;
   if (topics[i].done) { topicsDoneCount++; addLog('✅ Done: ' + topics[i].name); }
-  renderTopics(); updateStats();
+  renderTopics(); updateStats(); saveState();
 }
 
 function delTopic(i) {
   topics.splice(i, 1);
   if (activeTopicIdx === i) { activeTopicIdx = -1; document.getElementById('topicChipText').textContent = '— tap a topic below —'; }
   else if (activeTopicIdx > i) activeTopicIdx--;
-  renderTopics();
+  renderTopics(); saveState();
 }
 
 // ══ LOG ══
@@ -1112,14 +1244,54 @@ function resetAll() {
   pause();
   pomCount=breakCount=checkinCount=streak=studySecs=topicsDoneCount=0;
   sessionNum=1; remainSecs=totalSecs; topics=[]; activeTopicIdx=-1;
+  timerStartedAt=null; checkinStartedAt=null;
   updateRing(); updateStats(); renderTopics();
   document.getElementById('topicChipText').textContent = '— tap a topic below —';
   document.getElementById('logUl').innerHTML = '<div class="log-row"><span class="log-t">--:--</span><span>Reset. Fresh start!</span></div>';
+  try { localStorage.removeItem(SK); } catch(e){}
 }
 
-// ══ INIT ══
+// ══ INIT — restore state or start fresh ══
 document.getElementById('ringTrack').style.strokeDasharray  = CIRC;
 document.getElementById('ringTrack').style.strokeDashoffset = 0;
+
+const restored = loadState();
+
+// Restore mode UI
+document.querySelectorAll('.pill').forEach((p,i) =>
+  p.classList.toggle('active', ['focus','short','long','custom'][i] === mode));
+document.getElementById('timerModeTag').textContent = MODES[mode].label;
+document.getElementById('ringTrack').style.stroke   = MODES[mode].color;
+
+// Restore wakeup interval UI
+document.getElementById('intStatus').innerHTML = `Popup every <b>${wakeupMins} mins</b> during focus`;
+document.querySelectorAll('.int-pill').forEach((p, i) =>
+  p.classList.toggle('active', ['5','10','15','20'][i] === String(wakeupMins)));
+
+// Restore topics
+renderTopics();
+if (activeTopicIdx >= 0 && topics[activeTopicIdx]) {
+  document.getElementById('topicChipText').textContent = topics[activeTopicIdx].name;
+}
+
+// Resume timer if was running
+if (running) {
+  document.getElementById('playBtn').textContent = '⏸';
+  document.getElementById('timerWrap').classList.add('running-ring');
+  checkinStartedAt = Date.now(); // restart checkin countdown from now
+  ticker = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    remainSecs = Math.max(0, remainAtStart - elapsed);
+    if (remainSecs <= 0) { clearInterval(ticker); running = false; onEnd(); return; }
+    updateRing(); updateStats(); saveState();
+    if (mode === 'focus' && checkinStartedAt) {
+      const sinceCheckin = (Date.now() - checkinStartedAt) / 1000 / 60;
+      if (sinceCheckin >= wakeupMins) { checkinStartedAt = null; clearInterval(ticker); showCheckPopup(); }
+    }
+  }, 1000);
+  addLog(restored ? '🔄 Resumed — timer was running when you left!' : '');
+}
+
 updateRing(); updateStats();
 </script>
 </body>
