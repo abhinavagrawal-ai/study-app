@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Study Leaderboard</title>
+
+<style>
+body{
+  background:#07080f;
+  color:#fff;
+  font-family:Arial;
+  padding:20px;
+}
+
+h1{
+  color:#f0b429;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+th,td{
+  padding:10px;
+  border-bottom:1px solid #333;
+  text-align:left;
+}
+
+.online{
+  color:lime;
+}
+
+.offline{
+  color:gray;
+}
+</style>
+
+</head>
+<body>
+
+<h1>📊 Live Study Leaderboard</h1>
+
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Course</th>
+<th>Hours</th>
+<th>Pomodoros</th>
+<th>Status</th>
+<th>Online</th>
+</tr>
+</thead>
+
+<tbody id="board"></tbody>
+
+</table>
+
+
+<script type="module">
+
+import { initializeApp } 
+from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+
+import { getFirestore, collection, onSnapshot } 
+from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+import { getDatabase, ref, onValue } 
+from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+
+// 🔥 SAME CONFIG AS YOUR APP
+const firebaseConfig = {
+  apiKey: "AIzaSyAAKHjx9eUQJAqrzhOjBaLdzyQZ80Wpgk8",
+  authDomain: "pomodoro-tracker-48b92.firebaseapp.com",
+  projectId: "pomodoro-tracker-48b92",
+  databaseURL: "https://pomodoro-tracker-48b92-default-rtdb.firebaseio.com",
+};
+
+const app = initializeApp(firebaseConfig);
+
+const db = getFirestore(app);
+const rtdb = getDatabase(app);
+
+const board = document.getElementById("board");
+
+let presenceMap = {};
+
+
+// ---------- PRESENCE ----------
+
+onValue(ref(rtdb,"presence"), snap => {
+
+  presenceMap = snap.val() || {};
+
+});
+
+
+
+// ---------- FIRESTORE ----------
+
+onSnapshot(collection(db,"studyUsers"), snap => {
+
+  board.innerHTML="";
+
+  snap.forEach(doc => {
+
+    const d = doc.data();
+
+    const online =
+      presenceMap[d.uid]?.online ? "online" : "offline";
+
+    board.innerHTML += `
+      <tr>
+        <td>${d.name}</td>
+        <td>${d.course}</td>
+        <td>${d.studyHours || 0}</td>
+        <td>${d.pomodoros || 0}</td>
+        <td>${d.status}</td>
+        <td class="${online}">
+          ${online}
+        </td>
+      </tr>
+    `;
+
+  });
+
+});
+
+</script>
+
+</body>
+</html>
