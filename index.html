@@ -429,7 +429,7 @@ html, body {
 /* ══ ONBOARDING ══ */
 #onboardScreen {
   position:fixed; inset:0; background:var(--bg);
-  z-index:9999; display:flex; flex-direction:column;
+  z-index:99999; display:flex; flex-direction:column;
   align-items:center; justify-content:flex-start;
   padding:40px 22px 30px; overflow-y:auto;
 }
@@ -445,9 +445,9 @@ html, body {
 .ob-input::placeholder { color:var(--muted); }
 .ob-prep-label { font-size:10px; font-weight:700; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-bottom:8px; display:block; }
 .ob-prep-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; width:100%; margin-bottom:14px; }
-.ob-prep-btn { background:var(--s2); border:1.5px solid var(--border); color:var(--muted); font-family:'Syne',sans-serif; font-size:11px; font-weight:700; padding:10px 6px; border-radius:12px; cursor:pointer; text-align:center; transition:all 0.2s; line-height:1.4; -webkit-user-select:none; }
+.ob-prep-btn { background:var(--s2); border:1.5px solid var(--border); color:var(--muted); font-family:'Syne',sans-serif; font-size:11px; font-weight:700; padding:10px 6px; border-radius:12px; cursor:pointer; text-align:center; transition:all 0.2s; line-height:1.4; -webkit-user-select:none; pointer-events:auto; }
 .ob-prep-btn.selected { background:rgba(240,180,41,0.1); border-color:var(--gold); color:var(--gold); }
-.ob-prep-btn span { display:block; font-size:18px; margin-bottom:3px; }
+.ob-prep-btn span { display:block; font-size:18px; margin-bottom:3px; pointer-events:none; }
 .ob-other-row { display:none; width:100%; margin-bottom:14px; }
 .ob-other-row.show { display:block; }
 .ob-start-btn { width:100%; background:linear-gradient(135deg,var(--gold),var(--gold2)); color:#000; font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:3px; padding:16px; border:none; border-radius:14px; cursor:pointer; margin-top:6px; box-shadow:0 4px 24px rgba(240,180,41,0.3); }
@@ -610,6 +610,7 @@ html, body {
 #widgetToggleBtn.hidden { display: none; }
 #widgetToggleBtn:hover { border-color: var(--gold); }
 </style>
+</head>
 <body>
 
 <!-- ══ ONBOARDING ══ -->
@@ -715,7 +716,7 @@ html, body {
           <div class="stat-box"><div class="stat-n" id="sGoal">0%</div><div class="stat-l">🏆 Daily Goal</div></div>
         </div>
         <div style="margin-top:10px;">
-          <div class="prog-labels"><span>Daily Goal — 8 Pomodoros</span><span id="progPct">0 / 8</span></div>
+          <div class="prog-labels"><span id="progGoalLabel">Daily Goal — 8 Pomodoros</span><span id="progPct">0 / 8</span></div>
           <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
         </div>
       </div>
@@ -1047,8 +1048,10 @@ function populateSyllabus(prep) {
 //  ONBOARDING
 // ══════════════════════════════════════════
 function selectPrep(el, val) {
+  // Use closest() so tapping the inner emoji <span> still targets the correct .ob-prep-btn
+  const btn = el.closest ? (el.closest('.ob-prep-btn') || el) : el;
   document.querySelectorAll('.ob-prep-btn').forEach(b=>b.classList.remove('selected'));
-  el.classList.add('selected');
+  btn.classList.add('selected');
   selectedPrep = val;
   document.getElementById('obOtherRow').classList.toggle('show', val==='other');
 }
@@ -1116,10 +1119,10 @@ function switchTab(tab) {
 // ══════════════════════════════════════════
 //  CONSTANTS & STATE
 // ══════════════════════════════════════════
-// updateWidget() is defined later — widget has its own independent interval
-// so it does NOT need to be called manually anywhere.
-// This no-op prevents "function not defined" errors during early init.
-const updateWidget = () => {};
+// updateWidget() is defined later in the script.
+// Using var here so the real function declaration below can safely override it
+// without a "Cannot redeclare block-scoped variable" SyntaxError.
+var updateWidget = function() {};
 
 const CIRC = 2*Math.PI*90; // r=90
 
@@ -1420,6 +1423,7 @@ function updateStats() {
   document.getElementById('streakN').textContent=streak;
   document.getElementById('progFill').style.width=gp+'%';
   document.getElementById('progPct').textContent=pomCount+' / '+dailyGoal;
+  document.getElementById('progGoalLabel').textContent='Daily Goal — '+dailyGoal+' Pomodoros';
 }
 
 function setDailyGoal(val) {
@@ -1520,12 +1524,23 @@ function renderTopics() {
   topics.forEach((t,i)=>{
     const d=document.createElement('div');
     d.className='t-item'+(i===activeTopicIdx?' active':'')+(t.done?' done':'');
-    d.innerHTML=`<div class="t-dot"></div>
-      <span style="flex:1" onclick="setActive(${i})">${t.name}</span>
-      <div class="t-acts">
-        <button class="t-btn" onclick="toggleDone(${i})" title="Mark done">✓</button>
-        <button class="t-btn" onclick="delTopic(${i})" style="color:var(--red)" title="Delete">✕</button>
-      </div>`;
+    // Build inner structure safely to avoid XSS from user-entered topic names
+    const dot=document.createElement('div');
+    dot.className='t-dot';
+    const nameSpan=document.createElement('span');
+    nameSpan.style.flex='1';
+    nameSpan.textContent=t.name; // safe: textContent, not innerHTML
+    nameSpan.onclick=()=>setActive(i);
+    const acts=document.createElement('div');
+    acts.className='t-acts';
+    const doneBtn=document.createElement('button');
+    doneBtn.className='t-btn'; doneBtn.title='Mark done'; doneBtn.textContent='✓';
+    doneBtn.onclick=()=>toggleDone(i);
+    const delBtn=document.createElement('button');
+    delBtn.className='t-btn'; delBtn.title='Delete'; delBtn.textContent='✕';
+    delBtn.style.color='var(--red)'; delBtn.onclick=()=>delTopic(i);
+    acts.appendChild(doneBtn); acts.appendChild(delBtn);
+    d.appendChild(dot); d.appendChild(nameSpan); d.appendChild(acts);
     ul.appendChild(d);
   });
 }
@@ -1734,6 +1749,7 @@ function resetAll(){
   pause();
   pomCount=breakCount=checkinCount=streak=studySecs=topicsDoneCount=0;
   sessionNum=1;remainSecs=totalSecs;timerStartedAt=null;checkinStartedAt=null;
+  _lastStudyElapsed=0;
   updateRing();updateStats();
   document.getElementById('logUl').innerHTML='<div class="log-row"><span class="log-t">--:--</span><span>Reset. Fresh start!</span></div>';
   saveState();
@@ -1881,6 +1897,9 @@ function drawChart() {
     const DAYS    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     document.getElementById('mBestDay').textContent  = DAYS[bestDate.getDay()];
     document.getElementById('mAvgPom').textContent   = (allVals.reduce((s,d)=>s+d.val,0)/allVals.length).toFixed(1);
+  } else {
+    document.getElementById('mBestDay').textContent = '—';
+    document.getElementById('mAvgPom').textContent  = '0';
   }
 
   // Best streak calculation
@@ -2001,7 +2020,14 @@ document.getElementById('ringTrack').style.stroke=MODES[mode].color;
 
 // Restore wakeup UI
 document.getElementById('intStatus').innerHTML=`Popup every <b>${wakeupMins} mins</b> during focus`;
-document.querySelectorAll('.int-pill').forEach((p,i)=>p.classList.toggle('active',['5','10','15','20'][i]===String(wakeupMins)));
+(function(){
+  const std=['5','10','15','20'];
+  const isStd=std.includes(String(wakeupMins));
+  document.querySelectorAll('.int-pill').forEach((p,i)=>{
+    if(i<4) p.classList.toggle('active', std[i]===String(wakeupMins));
+    else    p.classList.toggle('active', !isStd); // highlight "custom" pill if value is non-standard
+  });
+})();
 
 // Restore daily goal UI
 document.getElementById('dailyGoalSelect').value=String(dailyGoal);
