@@ -533,8 +533,83 @@ html, body {
 .settings-row:last-child { border-bottom:none; }
 .settings-label { font-size:12px; font-weight:700; color:var(--text); }
 .settings-sub { font-size:10px; color:var(--muted); margin-top:2px; }
+/* ══ FLOATING WIDGET ══ */
+#floatWidget {
+  position: fixed;
+  bottom: 80px; right: 16px;
+  width: 148px;
+  background: var(--s1);
+  border: 1.5px solid var(--gold);
+  border-radius: 14px;
+  padding: 10px 12px 8px;
+  z-index: 9000;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  display: none;
+  transition: opacity 0.2s;
+}
+#floatWidget.visible { display: block; }
+#floatWidget.minimized { width: 72px; padding: 7px 10px; }
+.fw-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.fw-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 11px; letter-spacing: 2px;
+  color: var(--gold); line-height: 1;
+}
+.fw-btns { display: flex; gap: 4px; }
+.fw-btn {
+  background: none; border: none;
+  color: var(--muted); font-size: 13px;
+  cursor: pointer; padding: 0; line-height: 1;
+  transition: color 0.15s;
+}
+.fw-btn:hover { color: var(--gold); }
+.fw-time {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 30px; letter-spacing: 3px;
+  color: #fff; line-height: 1; text-align: center;
+}
+.fw-mode {
+  font-size: 9px; font-weight: 800; letter-spacing: 3px;
+  color: var(--gold); text-transform: uppercase;
+  text-align: center; margin-top: 2px;
+}
+.fw-bar-bg {
+  height: 3px; background: var(--s3);
+  border-radius: 99px; margin-top: 7px; overflow: hidden;
+}
+.fw-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold2), var(--gold));
+  border-radius: 99px; transition: width 0.5s linear;
+}
+#floatWidget.minimized .fw-time { font-size: 18px; letter-spacing: 1px; }
+#floatWidget.minimized .fw-mode,
+#floatWidget.minimized .fw-bar-bg,
+#floatWidget.minimized .fw-header { display: none; }
+
+/* Widget toggle button */
+#widgetToggleBtn {
+  position: fixed;
+  bottom: 80px; right: 16px;
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  background: var(--s2);
+  border: 1.5px solid var(--border);
+  color: var(--gold); font-size: 18px;
+  cursor: pointer; z-index: 8999;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+  transition: all 0.2s;
+}
+#widgetToggleBtn.hidden { display: none; }
+#widgetToggleBtn:hover { border-color: var(--gold); }
 </style>
-</head>
 <body>
 
 <!-- ══ ONBOARDING ══ -->
@@ -1041,6 +1116,11 @@ function switchTab(tab) {
 // ══════════════════════════════════════════
 //  CONSTANTS & STATE
 // ══════════════════════════════════════════
+// updateWidget() is defined later — widget has its own independent interval
+// so it does NOT need to be called manually anywhere.
+// This no-op prevents "function not defined" errors during early init.
+const updateWidget = () => {};
+
 const CIRC = 2*Math.PI*90; // r=90
 
 const MODES = {
@@ -1094,7 +1174,7 @@ function loadState() {
     if (running&&timerStartedAt) {
       const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
       remainSecs=Math.max(0,remainAtStart-elapsed);
-      // do not add here, handled in ticker
+      if (mode==='focus') studySecs+=Math.min(elapsed,remainAtStart);
     }
     return true;
   } catch(e){return false;}
@@ -1137,74 +1217,178 @@ function applyCustom() {
 }
 
 // ══════════════════════════════════════════
-//  TIMER (timestamp-based)
+//  TIMER (timestamp-based, single ticker)
 // ══════════════════════════════════════════
 function toggleTimer(){running?pause():start();}
 
-function start() {
-  running=true; timerStartedAt=Date.now(); remainAtStart=remainSecs; checkinStartedAt=Date.now();
-  document.getElementById('playBtn').textContent='⏸';
-  document.getElementById('timerWrap').classList.add('running-ring');
-  addLog('▶ Started '+MODES[mode].label+(activeTopicIdx>=0?' — '+topics[activeTopicIdx].name:''));
-  ticker=setInterval(()=>{
-    const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
-    remainSecs=Math.max(0,remainAtStart-elapsed);
-    
-    if (mode==='focus') studySecs++;
-    if (remainSecs<=0){clearInterval(ticker);running=false;timerStartedAt=null;onEnd();return;}
-    // Soft tick every 60 seconds as a gentle reminder
-    if (remainSecs%60===0 && remainSecs>0 && mode==='focus') playTick();
-    updateRing(); updateStats(); saveState();
-    if (mode==='focus'&&checkinStartedAt) {
-      const sinceCheckin=(Date.now()-checkinStartedAt)/1000/60;
-      if (sinceCheckin>=wakeupMins){checkinStartedAt=null;clearInterval(ticker);showCheckPopup();}
+// ── Core ticker — called by ONE setInterval only ──
+// ── saveState throttle — only write to localStorage every 5 seconds ──
+let _lastSaveAt = 0;
+function _throttledSave() {
+  const now = Date.now();
+  if (now - _lastSaveAt >= 5000) {
+    try { saveState(); } catch(e) {}
+    _lastSaveAt = now;
+  }
+}
+
+function _tick() {
+  if (!running || !timerStartedAt) return;
+  const now     = Date.now();
+  const elapsed = Math.floor((now - timerStartedAt) / 1000);
+  remainSecs    = Math.max(0, remainAtStart - elapsed);
+
+  // Accumulate study seconds accurately
+  if (mode === 'focus') {
+    const newStudy = Math.min(elapsed, remainAtStart);
+    studySecs = (studySecs - _lastStudyElapsed) + newStudy;
+    _lastStudyElapsed = newStudy;
+  }
+
+  if (remainSecs <= 0) {
+    _stopTicker();
+    running = false;
+    timerStartedAt = null;
+    onEnd();
+    return;
+  }
+
+  // Soft tick every 60s
+  if (remainSecs % 60 === 0 && mode === 'focus') playTick();
+
+  // Check-in popup
+  if (mode === 'focus' && checkinStartedAt) {
+    const sinceCheckin = (now - checkinStartedAt) / 1000 / 60;
+    if (sinceCheckin >= wakeupMins) {
+      checkinStartedAt = null;
+      _stopTicker();
+      showCheckPopup();
+      return;
     }
-  },1000);
+  }
+
+  updateRing(); updateStats();
+  _throttledSave(); // ← throttled: writes to localStorage max once per 5s
+}
+
+let _lastStudyElapsed = 0;
+
+function _startTicker() {
+  _stopTicker(); // always clear before starting
+  ticker = setInterval(_tick, 500); // 500ms for responsiveness
+}
+
+function _stopTicker() {
+  if (ticker) { clearInterval(ticker); ticker = null; }
+}
+
+function start() {
+  if (running) return; // prevent double start
+  running          = true;
+  timerStartedAt   = Date.now();
+  remainAtStart    = remainSecs;
+  checkinStartedAt = Date.now();
+  _lastStudyElapsed = 0;
+  document.getElementById('playBtn').textContent = '⏸';
+  document.getElementById('timerWrap').classList.add('running-ring');
+  addLog('▶ Started ' + MODES[mode].label + (activeTopicIdx >= 0 ? ' — ' + topics[activeTopicIdx].name : ''));
+  _startTicker();
 }
 
 function pause() {
-  running=false; clearInterval(ticker); timerStartedAt=null; checkinStartedAt=null;
-  document.getElementById('playBtn').textContent='▶';
+  _stopTicker();
+  running          = false;
+  timerStartedAt   = null;
+  checkinStartedAt = null;
+  _lastStudyElapsed = 0;
+  document.getElementById('playBtn').textContent = '▶';
   document.getElementById('timerWrap').classList.remove('running-ring');
-  addLog('⏸ Paused at '+fmt(remainSecs)); saveState();
+  addLog('⏸ Paused at ' + fmt(remainSecs));
+  try { saveState(); } catch(e) {}
+  updateWidget();
 }
 
 function resetTimer() {
-  pause(); remainSecs=totalSecs; updateRing();
-  document.getElementById('timerDigits').style.color='#fff';
-  document.getElementById('ringTrack').style.stroke=MODES[mode].color;
-  saveState();
+  pause();
+  remainSecs = totalSecs;
+  updateRing();
+  document.getElementById('timerDigits').style.color = '#fff';
+  document.getElementById('ringTrack').style.stroke  = MODES[mode].color;
+  try { saveState(); } catch(e) {}
 }
 
-function skipTimer(){pause();remainSecs=0;updateRing();onEnd();}
+function skipTimer() { pause(); remainSecs = 0; updateRing(); onEnd(); }
 
 function onEnd() {
-  document.getElementById('playBtn').textContent='▶';
+  _stopTicker();
+  document.getElementById('playBtn').textContent = '▶';
   document.getElementById('timerWrap').classList.remove('running-ring');
-  playGong(); // 🔔 gong on session complete
-  if (mode==='focus') {
+  playGong();
+  if (mode === 'focus') {
     pomCount++; sessionNum++;
-    addLog('✅ Pomodoro #'+pomCount+' complete!');
-    document.getElementById('breakPomN').textContent=pomCount;
+    addLog('✅ Pomodoro #' + pomCount + ' complete!');
+    document.getElementById('breakPomN').textContent = pomCount;
     showBreakPopup();
   } else {
-    breakCount++; addLog('☕ Break over. Back to focus!'); setMode('focus');
+    breakCount++;
+    addLog('☕ Break over. Back to focus!');
+    setMode('focus');
   }
-  updateStats(); saveState();
+  updateStats(); updateWidget();
+  try { saveState(); } catch(e) {}
 }
 
-// Page visibility — handles tab switch/screen off
-document.addEventListener('visibilitychange',()=>{
-  if (!document.hidden&&running&&timerStartedAt) {
-    const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
-    remainSecs=Math.max(0,remainAtStart-elapsed);
-    if (remainSecs<=0){clearInterval(ticker);running=false;timerStartedAt=null;onEnd();return;}
-    if (mode==='focus'&&checkinStartedAt) {
-      const sinceCheckin=(Date.now()-checkinStartedAt)/1000/60;
-      if (sinceCheckin>=wakeupMins){checkinStartedAt=null;clearInterval(ticker);showCheckPopup();return;}
-    }
-    updateRing(); updateStats();
+// Page visibility — tab comes back to foreground
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // Tab going to background — force immediate save with current timestamp
+    _lastSaveAt = 0; // reset throttle so saveState runs immediately
+    try { saveState(); } catch(e) {}
+    return;
   }
+
+  // ── Tab visible again ──
+  // Even if JS was fully suspended (sleep/hibernate), timerStartedAt
+  // is in localStorage. Recalculate from wall-clock elapsed time.
+  if (!running || !timerStartedAt) return;
+
+  const now     = Date.now();
+  const elapsed = Math.floor((now - timerStartedAt) / 1000);
+  remainSecs    = Math.max(0, remainAtStart - elapsed);
+
+  if (mode === 'focus') {
+    const newStudy    = Math.min(elapsed, remainAtStart);
+    studySecs         = (studySecs - _lastStudyElapsed) + newStudy;
+    _lastStudyElapsed = newStudy;
+  }
+
+  // Timer expired while sleeping
+  if (remainSecs <= 0) {
+    _stopTicker();
+    running        = false;
+    timerStartedAt = null;
+    // If slept through entire session, count it as completed
+    if (mode === 'focus' && elapsed >= remainAtStart) {
+      addLog('⚡ Session completed while away!');
+    }
+    onEnd();
+    return;
+  }
+
+  // Check-in overdue
+  if (mode === 'focus' && checkinStartedAt) {
+    const sinceCheckin = (now - checkinStartedAt) / 1000 / 60;
+    if (sinceCheckin >= wakeupMins) {
+      checkinStartedAt = null;
+      _stopTicker();
+      showCheckPopup();
+      return;
+    }
+  }
+
+  // Ticker may have drifted or been killed — always restart cleanly
+  _startTicker();
+  updateRing(); updateStats();
 });
 
 // ══════════════════════════════════════════
@@ -1253,7 +1437,7 @@ function setInterval_(mins) {
     return;
   }
   document.getElementById('intervalCustomRow').classList.remove('show');
-  wakeupMins=parseInt(mins);
+  wakeupMins = parseInt(mins) || 10;
   document.querySelectorAll('.int-pill').forEach((p,i)=>p.classList.toggle('active',['5','10','15','20'][i]===mins));
   document.getElementById('intStatus').innerHTML=`Popup every <b>${wakeupMins} mins</b> during focus`;
   addLog(`⏰ Wakeup set to ${wakeupMins} mins`);
@@ -1287,24 +1471,19 @@ function showCheckPopup() {
 function confirmCheckin() {
   streak++; checkinCount++;
   document.getElementById('checkOverlay').classList.remove('show');
-  addLog('✓ Check-in #'+checkinCount+' confirmed! Streak: '+streak+' 🔥');
+  addLog('✓ Check-in #' + checkinCount + ' confirmed! Streak: ' + streak + ' 🔥');
   updateStats();
-  timerStartedAt=Date.now(); remainAtStart=remainSecs; checkinStartedAt=Date.now();
-  running=true;
-  document.getElementById('playBtn').textContent='⏸';
+  // Resume timer — reuse single start() logic
+  remainSecs       = Math.max(1, remainSecs); // ensure at least 1s left
+  checkinStartedAt = Date.now();
+  running          = true;
+  timerStartedAt   = Date.now();
+  remainAtStart    = remainSecs;
+  _lastStudyElapsed = 0;
+  document.getElementById('playBtn').textContent = '⏸';
   document.getElementById('timerWrap').classList.add('running-ring');
-  ticker=setInterval(()=>{
-    const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
-    remainSecs=Math.max(0,remainAtStart-elapsed);
-     if (mode==='focus') studySecs++;
-    if (remainSecs<=0){clearInterval(ticker);running=false;timerStartedAt=null;onEnd();return;}
-    updateRing(); updateStats(); saveState();
-    if (mode==='focus'&&checkinStartedAt) {
-      const sinceCheckin=(Date.now()-checkinStartedAt)/1000/60;
-      if (sinceCheckin>=wakeupMins){checkinStartedAt=null;clearInterval(ticker);showCheckPopup();}
-    }
-  },1000);
-  saveState();
+  _startTicker();
+  try { saveState(); } catch(e) {}
 }
 
 function showBreakPopup(){document.getElementById('breakOverlay').classList.add('show');}
@@ -1468,11 +1647,29 @@ function loadHistory(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY))|
 function saveHistory(){
   try{
     const history=loadHistory();
-    history[todayKey()]={date:todayKey(),pomodoros:pomCount,studySecs,checkins:checkinCount,topics:topics.map(t=>({name:t.name,done:t.done}))};
-    const keys=Object.keys(history).sort().slice(-7);
+    // Store compact version of today (no full topic details — save space)
+    const topicSnap = topics.map(t=>({name:t.name.slice(0,40), done:t.done})); // limit topic name length
+    history[todayKey()]={
+      date:todayKey(),
+      pomodoros:pomCount,
+      studySecs,
+      checkins:checkinCount,
+      topics:topicSnap
+    };
+    // Keep last 30 days max (chart needs 30, week view needs 7)
+    const keys=Object.keys(history).sort().slice(-30);
     const trimmed={};
     keys.forEach(k=>trimmed[k]=history[k]);
-    localStorage.setItem(HISTORY_KEY,JSON.stringify(trimmed));
+    // Safety: if storage getting large (>100KB), reduce to 14 days
+    const json = JSON.stringify(trimmed);
+    if (json.length > 100000) {
+      const safeKeys = keys.slice(-14);
+      const safeTrimmed = {};
+      safeKeys.forEach(k=>safeTrimmed[k]=trimmed[k]);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(safeTrimmed));
+    } else {
+      localStorage.setItem(HISTORY_KEY, json);
+    }
   }catch(e){}
 }
 
@@ -1563,7 +1760,7 @@ function switchChart(metric) {
 }
 
 function switchChartRange(days) {
-  chartRange = parseInt(days);
+  chartRange = parseInt(days) || 30;
   document.getElementById('chartToggle7').classList.toggle('active',  days==='7');
   document.getElementById('chartToggle30').classList.toggle('active', days==='30');
   drawChart();
@@ -1816,33 +2013,159 @@ if(activeTopicIdx>=0&&topics[activeTopicIdx]){
 }
 
 // Resume timer if was running
-if(running){
-  document.getElementById('playBtn').textContent='⏸';
+if (running) {
+  document.getElementById('playBtn').textContent = '⏸';
   document.getElementById('timerWrap').classList.add('running-ring');
-  checkinStartedAt=Date.now();
-  ticker=setInterval(()=>{
-    const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
-    remainSecs=Math.max(0,remainAtStart-elapsed);
-    if (mode==='focus') studySecs++;
-
-    if(remainSecs<=0){clearInterval(ticker);running=false;onEnd();return;}
-    updateRing();updateStats();saveState();
-    if(mode==='focus'&&checkinStartedAt){
-      const sinceCheckin=(Date.now()-checkinStartedAt)/1000/60;
-      if(sinceCheckin>=wakeupMins){checkinStartedAt=null;clearInterval(ticker);showCheckPopup();}
-    }
-  },1000);
-  addLog(restored?'🔄 Resumed — timer was running!':'');
+  checkinStartedAt  = Date.now(); // restart checkin window from now
+  _lastStudyElapsed = 0;
+  _startTicker();
+  addLog(restored ? '🔄 Resumed — timer was running!' : '');
 }
 
-updateRing();updateStats();
+updateRing(); updateStats(); updateWidget();
 
-// Redraw chart on resize/orientation change
-window.addEventListener('resize', ()=>{
-  if (document.getElementById('tab-history').classList.contains('active')) {
-    requestAnimationFrame(()=>{ drawChart(); drawHeatmap(); });
+// Redraw chart on resize/orientation change — use ResizeObserver for accuracy
+(function() {
+  const histTab = document.getElementById('tab-history');
+  const canvas  = document.getElementById('statsChart');
+  if (!histTab || !canvas) return;
+
+  let _resizeTimer = null;
+  function _onResize() {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+      if (histTab.classList.contains('active')) {
+        requestAnimationFrame(() => { try { drawChart(); drawHeatmap(); } catch(e){} });
+      }
+    }, 150); // debounce 150ms
   }
+
+  // ResizeObserver watches the canvas element itself
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(_onResize).observe(canvas);
+  } else {
+    // Fallback for older browsers
+    window.addEventListener('resize', _onResize);
+  }
+  // Also handle orientation change on mobile
+  window.addEventListener('orientationchange', () => {
+    setTimeout(_onResize, 300); // wait for rotation to complete
+  });
+})();
+
+// ══════════════════════════════════════════
+//  FLOATING WIDGET
+//  Has its own independent 500ms interval —
+//  never depends on updateWidget() call sites
+// ══════════════════════════════════════════
+let widgetVisible   = false;
+let widgetMinimized = false;
+let widgetDragging  = false;
+let widgetDragOffX  = 0, widgetDragOffY = 0;
+
+// Override stub — real implementation reads global state directly
+function updateWidget() {
+  if (!widgetVisible) return;
+  const t   = document.getElementById('fwTime');
+  const m   = document.getElementById('fwMode');
+  const b   = document.getElementById('fwBar');
+  const pct = totalSecs > 0 ? ((remainSecs / totalSecs) * 100).toFixed(1) : 0;
+  if (t) t.textContent  = fmt(remainSecs);
+  if (m) {
+    m.textContent   = MODES[mode].label;
+    m.style.color   = running ? 'var(--gold)' : 'var(--muted)';
+  }
+  if (b) b.style.width  = pct + '%';
+}
+
+// Independent widget refresh loop — syncs every 500ms regardless of _tick
+setInterval(() => { try { updateWidget(); } catch(e){} }, 500);
+
+function showWidget() {
+  widgetVisible = true;
+  const w  = document.getElementById('floatWidget');
+  const tb = document.getElementById('widgetToggleBtn');
+  w.classList.add('visible');
+  tb.classList.add('hidden');
+  updateWidget();
+}
+
+function hideWidget() {
+  widgetVisible = false;
+  document.getElementById('floatWidget').classList.remove('visible');
+  document.getElementById('widgetToggleBtn').classList.remove('hidden');
+}
+
+function toggleWidgetMin() {
+  widgetMinimized = !widgetMinimized;
+  const w = document.getElementById('floatWidget');
+  w.classList.toggle('minimized', widgetMinimized);
+  document.getElementById('fwMinBtn').textContent = widgetMinimized ? '+' : '–';
+  updateWidget();
+}
+
+// Drag logic (mouse + touch) — guard against missing element
+const _fw = document.getElementById('floatWidget');
+if (_fw) {
+_fw.addEventListener('mousedown', e => {
+  if (e.target.closest('.fw-btn')) return;
+  widgetDragging = true;
+  widgetDragOffX = e.clientX - _fw.getBoundingClientRect().left;
+  widgetDragOffY = e.clientY - _fw.getBoundingClientRect().top;
+  _fw.style.cursor = 'grabbing';
+  e.preventDefault();
 });
+document.addEventListener('mousemove', e => {
+  if (!widgetDragging) return;
+  const x = Math.min(Math.max(0, e.clientX - widgetDragOffX), window.innerWidth  - _fw.offsetWidth);
+  const y = Math.min(Math.max(0, e.clientY - widgetDragOffY), window.innerHeight - _fw.offsetHeight);
+  _fw.style.right  = 'auto';
+  _fw.style.bottom = 'auto';
+  _fw.style.left   = x + 'px';
+  _fw.style.top    = y + 'px';
+});
+document.addEventListener('mouseup', () => { widgetDragging = false; _fw.style.cursor = 'grab'; });
+
+// Drag logic (touch)
+_fw.addEventListener('touchstart', e => {
+  if (e.target.closest('.fw-btn')) return;
+  const t = e.touches[0];
+  widgetDragging = true;
+  widgetDragOffX = t.clientX - _fw.getBoundingClientRect().left;
+  widgetDragOffY = t.clientY - _fw.getBoundingClientRect().top;
+  e.preventDefault();
+}, {passive:false});
+document.addEventListener('touchmove', e => {
+  if (!widgetDragging) return;
+  const t  = e.touches[0];
+  const x  = Math.min(Math.max(0, t.clientX - widgetDragOffX), window.innerWidth  - _fw.offsetWidth);
+  const y  = Math.min(Math.max(0, t.clientY - widgetDragOffY), window.innerHeight - _fw.offsetHeight);
+  _fw.style.right  = 'auto';
+  _fw.style.bottom = 'auto';
+  _fw.style.left   = x + 'px';
+  _fw.style.top    = y + 'px';
+  e.preventDefault();
+}, {passive:false});
+document.addEventListener('touchend', () => { widgetDragging = false; });
+} // end _fw guard
 </script>
+<!-- ══ FLOATING WIDGET ══ -->
+<button id="widgetToggleBtn" onclick="showWidget()" title="Show floating timer">⏱</button>
+
+<div id="floatWidget">
+  <div class="fw-header">
+    <div class="fw-title">🍅 TIMER</div>
+    <div class="fw-btns">
+      <button class="fw-btn" onclick="toggleWidgetMin()" title="Minimize" id="fwMinBtn">–</button>
+      <button class="fw-btn" onclick="hideWidget()" title="Close">✕</button>
+    </div>
+  </div>
+  <div class="fw-time" id="fwTime">25:00</div>
+  <div class="fw-mode" id="fwMode">FOCUS</div>
+  <div class="fw-bar-bg">
+    <div class="fw-bar-fill" id="fwBar" style="width:100%"></div>
+  </div>
+</div>
+
 </body>
 </html>
