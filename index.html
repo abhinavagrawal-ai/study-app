@@ -1094,7 +1094,7 @@ function loadState() {
     if (running&&timerStartedAt) {
       const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
       remainSecs=Math.max(0,remainAtStart-elapsed);
-      if (mode==='focus') studySecs+=Math.min(elapsed,remainAtStart);
+      // do not add here, handled in ticker
     }
     return true;
   } catch(e){return false;}
@@ -1149,7 +1149,8 @@ function start() {
   ticker=setInterval(()=>{
     const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
     remainSecs=Math.max(0,remainAtStart-elapsed);
-    if (mode==='focus') studySecs=Math.min(studySecs+1,studySecs+elapsed);
+    
+    if (mode==='focus') studySecs++;
     if (remainSecs<=0){clearInterval(ticker);running=false;timerStartedAt=null;onEnd();return;}
     // Soft tick every 60 seconds as a gentle reminder
     if (remainSecs%60===0 && remainSecs>0 && mode==='focus') playTick();
@@ -1295,6 +1296,7 @@ function confirmCheckin() {
   ticker=setInterval(()=>{
     const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
     remainSecs=Math.max(0,remainAtStart-elapsed);
+     if (mode==='focus') studySecs++;
     if (remainSecs<=0){clearInterval(ticker);running=false;timerStartedAt=null;onEnd();return;}
     updateRing(); updateStats(); saveState();
     if (mode==='focus'&&checkinStartedAt) {
@@ -1821,6 +1823,8 @@ if(running){
   ticker=setInterval(()=>{
     const elapsed=Math.floor((Date.now()-timerStartedAt)/1000);
     remainSecs=Math.max(0,remainAtStart-elapsed);
+    if (mode==='focus') studySecs++;
+
     if(remainSecs<=0){clearInterval(ticker);running=false;onEnd();return;}
     updateRing();updateStats();saveState();
     if(mode==='focus'&&checkinStartedAt){
