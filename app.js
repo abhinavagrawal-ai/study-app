@@ -1110,9 +1110,19 @@ function bindEvents() {
   // Logout
   $('logoutBtn')?.addEventListener('click', async () => {
     if (!confirm('Sign out? Your data is saved in the cloud.')) return;
+    try { pause(); } catch(e) {}
+    try {
+      // Clear local data so next user starts fresh
+      localStorage.removeItem(SK);
+      localStorage.removeItem(HISTORY_KEY);
+      localStorage.removeItem(PROFILE_KEY);
+    } catch(e) {}
     try {
       if (typeof window._authLogout === 'function') await window._authLogout();
-    } catch(e) { window.location.reload(); }
+    } catch(e) {
+      // Force auth screen even if signOut failed
+      window._appAuthReady(null);
+    }
   });
 
   // Nav tabs
@@ -1340,20 +1350,35 @@ let _appInited = false;
 // Called by firebase-sync.js via onAuthStateChanged
 window._appAuthReady = function(user) {
   const authScreen = $('authScreen');
+  const appShell   = document.querySelector('.app-shell');
+  const onboard    = $('onboardScreen');
   if (!authScreen) return;
+
   if (user) {
+    // Logged in — hide auth screen, show app
     authScreen.classList.add('hidden');
+    if (appShell) appShell.style.display = '';
     if (!_appInited) { _appInited = true; init(); }
   } else {
-    // User signed out — reload for clean state
-    if (_appInited) { window.location.reload(); return; }
+    // Signed out — show auth screen, hide everything else
     authScreen.classList.remove('hidden');
+    if (appShell) appShell.style.display = 'none';
+    if (onboard)  onboard.classList.add('hidden');
+    // Reset auth form
+    const un = $('authUsername'), pw = $('authPassword'), err = $('authError');
+    if (un)  un.value = '';
+    if (pw)  pw.value = '';
+    if (err) err.textContent = '';
+    const btn = $('authSubmitBtn');
+    if (btn) { btn.disabled = false; btn.textContent = 'Sign In ▶'; }
   }
 };
 
 function boot() {
+  // Hide app shell until auth confirmed
+  const appShell = document.querySelector('.app-shell');
+  if (appShell) appShell.style.display = 'none';
   bindAuthEvents();
-  // Auth screen is visible by default — firebase-sync will call _appAuthReady when ready
 }
 
 if (document.readyState === 'loading') {
@@ -1361,3 +1386,4 @@ if (document.readyState === 'loading') {
 } else {
   boot();
 }
+
