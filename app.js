@@ -4,11 +4,18 @@
  */
 
 // ══════════════════════════════════════════
-//  STORAGE KEYS
+//  STORAGE KEYS & APP VERSION
 // ══════════════════════════════════════════
 const SK          = 'pomTracker_v2';
 const HISTORY_KEY = 'pomHistory_v2';
 const PROFILE_KEY = 'pomProfile_v2';
+
+/**
+ * APP_VERSION — bump this when localStorage schema changes.
+ * loadState() runs migration when savedVersion < APP_VERSION.
+ * Current schema v2: adds savedDate, pomCount, sessionNum fields.
+ */
+const APP_VERSION = 2;
 
 // ══════════════════════════════════════════
 //  CONSTANTS
@@ -45,28 +52,60 @@ const SYLLABUS = {
 
 // ══════════════════════════════════════════
 //  ENCAPSULATED STATE
+//
+//  Flat structure preserved for backward compat
+//  with existing localStorage format and all
+//  existing code references (state.pomCount etc).
+//
+//  Namespace views (state.timer, state.profile,
+//  state.stats, state.ui, state.firebase) are
+//  live proxies into the same object — read/write
+//  through either path, both stay in sync.
 // ══════════════════════════════════════════
 const state = {
-  // Profile
+  // ── Profile ──────────────────────────────
   userName: '', userPrep: '', selectedPrep: '', dailyGoal: 8,
-  // Timer
+
+  // ── Timer ────────────────────────────────
   mode: 'focus', totalSecs: 25*60, remainSecs: 25*60,
   running: false, ticker: null,
+  timerStartedAt: null, remainAtStart: 0,
+  checkinStartedAt: null, _studySecsBase: 0,
+  wakeupMins: 10,
+
+  // ── Stats ─────────────────────────────────
   pomCount: 0, breakCount: 0, checkinCount: 0, streak: 0,
   studySecs: 0, topicsDoneCount: 0, sessionNum: 1,
-  topics: [], activeTopicIdx: -1, wakeupMins: 10,
-  timerStartedAt: null, remainAtStart: 0, checkinStartedAt: null,
-  _studySecsBase: 0,
-  // Widget
+
+  // ── Topics ───────────────────────────────
+  topics: [], activeTopicIdx: -1,
+
+  // ── UI / Widget ──────────────────────────
   widgetVisible: false, widgetMinimized: false,
   widgetDragging: false, widgetDragOffX: 0, widgetDragOffY: 0,
-  // Audio
+
+  // ── Audio ────────────────────────────────
   audioCtx: null, tickEnabled: true,
-  // Chart
+
+  // ── Chart ────────────────────────────────
   chartMetric: 'pom', chartRange: 30,
-  // Save throttle
+
+  // ── Internal ─────────────────────────────
   _lastSaveAt: 0,
+  _schemaVersion: APP_VERSION,   // written on every save, read for migration
 };
+
+/**
+ * Namespace views — live references into the same state object.
+ * Use state.timer.running or state.running — identical.
+ * Enables future modularisation without breaking current code.
+ */
+Object.defineProperties(state, {
+  timer:   { get() { return this; }, enumerable: false },
+  profile: { get() { return this; }, enumerable: false },
+  stats:   { get() { return this; }, enumerable: false },
+  ui:      { get() { return this; }, enumerable: false },
+});
 
 // ══════════════════════════════════════════
 //  HELPERS
@@ -129,15 +168,18 @@ function getQuotes() {
 
 function applyUserProfile() {
   const n = state.userName || 'Champion', p = state.userPrep || 'your exam';
-  $('headerName').textContent     = n;
-  $('profileName').textContent    = n;
-  $('profilePrep').textContent    = '📚 ' + p;
-  $('profileAvatar').textContent  = n.charAt(0).toUpperCase();
-  $('checkPopupName').textContent = `Future ${p} — ${n}! 🌟`;
-  $('breakPopupName').textContent = `${n} — You Earned This! 🏆`;
-  $('quoteBox').textContent = getQuotes()[Math.floor(Math.random() * getQuotes().length)];
+  // Production-safe DOM writes — never assume element exists
+  const _set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  _set('headerName',     n);
+  _set('profileName',    n);
+  _set('profilePrep',    '📚 ' + p);
+  _set('profileAvatar',  n.charAt(0).toUpperCase());
+  _set('checkPopupName', `Future ${p} — ${n}! 🌟`);
+  _set('breakPopupName', `${n} — You Earned This! 🏆`);
+  _set('quoteBox',       getQuotes()[Math.floor(Math.random() * getQuotes().length)]);
   populateSyllabus(p);
-  $('dailyGoalSelect').value = String(state.dailyGoal);
+  const goalEl = $('dailyGoalSelect');
+  if (goalEl) goalEl.value = String(state.dailyGoal);
   // Show auth username in account card
   const accEl = $('accountUsername');
   if (accEl && typeof window._getCurrentUser === 'function') {
@@ -147,14 +189,16 @@ function applyUserProfile() {
 }
 
 function populateSyllabus(prep) {
-  const sel = $('presetTopicSelect');
+  const sel  = $('presetTopicSelect');
+  const wrap = $('presetDropdownWrap');
+  if (!sel) return;
   sel.innerHTML = '<option value="">➕ Add from syllabus...</option>';
   (SYLLABUS[prep] || []).forEach(t => {
     const o = document.createElement('option');
     o.value = t; o.textContent = t;
     sel.appendChild(o);
   });
-  $('presetDropdownWrap').style.display = (SYLLABUS[prep] || []).length ? 'block' : 'none';
+  if (wrap) wrap.style.display = (SYLLABUS[prep] || []).length ? 'block' : 'none';
 }
 
 // ══════════════════════════════════════════
@@ -252,8 +296,9 @@ function saveState() {
     wakeupMins: state.wakeupMins, dailyGoal: state.dailyGoal,
     timerStartedAt: state.timerStartedAt, remainAtStart: state.remainAtStart,
     checkinStartedAt: state.checkinStartedAt, _studySecsBase: state._studySecsBase,
-    savedAt:   Date.now(),
-    savedDate: todayKey(),   // ISO date string — used by firebase-sync daily reset guard
+    savedAt:         Date.now(),
+    savedDate:       todayKey(),   // ISO date string — used by firebase-sync daily reset guard
+    _schemaVersion:  APP_VERSION,  // migration version — read by loadState on next open
   };
   try {
     localStorage.setItem(SK, JSON.stringify(snap));
@@ -271,6 +316,23 @@ function loadState() {
     const raw = localStorage.getItem(SK);
     if (!raw) return false;
     const s = JSON.parse(raw);
+
+    // ── Schema migration ─────────────────────────────────────────
+    // If savedVersion is missing or older than APP_VERSION,
+    // patch the record forward before reading it into state.
+    // Add new migration cases here as schema evolves.
+    const savedVersion = s._schemaVersion || 1;
+    if (savedVersion < APP_VERSION) {
+      // v1 → v2: ensure savedDate and sessionNum exist
+      if (savedVersion < 2) {
+        s.savedDate  = s.savedDate  || (s.savedAt ? new Date(s.savedAt).toISOString().slice(0,10) : '');
+        s.sessionNum = s.sessionNum || 1;
+        s._schemaVersion = 2;
+      }
+      // Future: if (savedVersion < 3) { ... }
+      try { localStorage.setItem(SK, JSON.stringify(s)); } catch {}
+    }
+
     const isNewDay = new Date(s.savedAt).toDateString() !== new Date().toDateString();
     if (isNewDay) {
       state.topics   = s.topics   || [];
@@ -323,9 +385,11 @@ function loadState() {
 //  CLOCK
 // ══════════════════════════════════════════
 function tickClock() {
-  const n = new Date();
-  $('topClock').textContent = n.toLocaleTimeString('en-IN', { hour12: false });
-  $('topDate').textContent  = n.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' });
+  const n    = new Date();
+  const clk  = $('topClock');
+  const date = $('topDate');
+  if (clk)  clk.textContent  = n.toLocaleTimeString('en-IN', { hour12: false });
+  if (date) date.textContent = n.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' });
 }
 
 // ══════════════════════════════════════════
@@ -538,13 +602,16 @@ document.addEventListener('visibilitychange', () => {
 //  RING
 // ══════════════════════════════════════════
 function updateRing() {
-  const pct = state.remainSecs / state.totalSecs;
-  $('ringTrack').style.strokeDashoffset = CIRC * (1 - pct);
-  $('timerDigits').textContent = fmt(state.remainSecs);
-  $('timerSessionInfo').textContent = 'Session #' + state.sessionNum;
+  const pct       = state.remainSecs / state.totalSecs;
+  const ringTrack = $('ringTrack');
+  const digits    = $('timerDigits');
+  const sessionEl = $('timerSessionInfo');
+  if (ringTrack) ringTrack.style.strokeDashoffset = CIRC * (1 - pct);
+  if (digits)    digits.textContent               = fmt(state.remainSecs);
+  if (sessionEl) sessionEl.textContent            = 'Session #' + state.sessionNum;
   if (state.remainSecs < 60 && isFocusMode() && state.running) {
-    $('ringTrack').style.stroke = '#ff3b55';
-    $('timerDigits').style.color = '#ff3b55';
+    if (ringTrack) ringTrack.style.stroke = '#ff3b55';
+    if (digits)    digits.style.color     = '#ff3b55';
   }
 }
 
@@ -555,14 +622,17 @@ function updateStats() {
   const h  = Math.floor(state.studySecs / 3600);
   const m  = Math.floor((state.studySecs % 3600) / 60);
   const gp = Math.min(100, Math.round((state.pomCount / state.dailyGoal) * 100));
-  $('sPomodoros').textContent = state.pomCount;
-  $('sTime').textContent      = h + 'h ' + m + 'm';
-  $('sCheckins').textContent  = state.checkinCount;
-  $('sGoal').textContent      = gp + '%';
-  $('streakN').textContent    = state.streak;
-  $('progFill').style.width   = gp + '%';
-  $('progPct').textContent    = state.pomCount + ' / ' + state.dailyGoal;
-  $('progGoalLabel').textContent = 'Daily Goal — ' + state.dailyGoal + ' Pomodoros';
+  // Production-safe DOM writes
+  const _set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  _set('sPomodoros',   state.pomCount);
+  _set('sTime',        h + 'h ' + m + 'm');
+  _set('sCheckins',    state.checkinCount);
+  _set('sGoal',        gp + '%');
+  _set('streakN',      state.streak);
+  _set('progPct',      state.pomCount + ' / ' + state.dailyGoal);
+  _set('progGoalLabel','Daily Goal — ' + state.dailyGoal + ' Pomodoros');
+  const progFill = $('progFill');
+  if (progFill) progFill.style.width = gp + '%';
 }
 
 function setDailyGoal(val) {
@@ -729,7 +799,9 @@ function delTopic(i) {
 //  LOG
 // ══════════════════════════════════════════
 function addLog(msg) {
-  const ul = $('logUl'), n = new Date();
+  const ul = $('logUl');
+  if (!ul) return;
+  const n = new Date();
   const t = n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
   const row = document.createElement('div');
   row.className = 'log-row';
@@ -1038,7 +1110,9 @@ function exportCSV() {
 //  FLOATING WIDGET
 // ══════════════════════════════════════════
 function updateWidget() {
+  // All widget elements are optional — widget may be hidden/unmounted
   const t = $('fwTime'), m = $('fwMode'), b = $('fwBar');
+  if (!t && !m && !b) return;   // widget not in DOM — skip entirely
   let displaySecs = state.remainSecs;
   if (state.running && state.timerStartedAt) {
     const elapsed = Math.floor((Date.now() - state.timerStartedAt) / 1000);
@@ -1046,7 +1120,7 @@ function updateWidget() {
   }
   const pct = state.totalSecs > 0 ? ((displaySecs / state.totalSecs) * 100).toFixed(1) : 0;
   if (t) t.textContent = fmt(displaySecs);
-  if (m) { m.textContent = MODES[state.mode].label; m.style.color = state.running ? 'var(--gold)' : 'var(--muted)'; }
+  if (m) { m.textContent = MODES[state.mode]?.label ?? 'FOCUS'; m.style.color = state.running ? 'var(--gold)' : 'var(--muted)'; }
   if (b) b.style.width = pct + '%';
 }
 
