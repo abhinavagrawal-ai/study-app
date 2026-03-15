@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Study Together — Live Leaderboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- ══════════════════════════════════════════════
+     🔥 FIREBASE CONFIG — POMODORO-TRACKER PROJECT
+     Project: pomodoro-tracker-48b92
+     Config already set — ready to deploy!
+══════════════════════════════════════════════ -->
+<script type="module">
+import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, setDoc, onSnapshot, collection, serverTimestamp, query, where }
+                                   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+// Expose query helpers so listenLeaderboard can filter by date
+window._fbExtraFns = { query, where };
+import { getDatabase, ref, onValue, onDisconnect, set, serverTimestamp as rtServerTimestamp }
+                                   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// ══ FIREBASE CONFIG — POMODORO-TRACKER PROJECT ══
+const firebaseConfig = {
+  apiKey:            "AIzaSyAAKHjx9eUQJAqrzhOjBaLdzyQZ80Wpgk8",
+  authDomain:        "pomodoro-tracker-48b92.firebaseapp.com",
+  databaseURL:       "https://pomodoro-tracker-48b92-default-rtdb.firebaseio.com",
+  projectId:         "pomodoro-tracker-48b92",
+  storageBucket:     "pomodoro-tracker-48b92.firebasestorage.app",
+  messagingSenderId: "209630101686",
+  appId:             "1:209630101686:web:70255b5c1f52a01d8ea617"
+};
+// ════════════════════════════════════════════
+
+const app  = initializeApp(firebaseConfig);
+const db   = getFirestore(app);      // Persistent records
+const rtdb = getDatabase(app);       // Presence (online/offline)
+
+// ── READ PROFILE FROM STUDY-APP'S localStorage ──
+const PROFILE_KEY = 'pomProfile_v2';
+const STATE_KEY   = 'pomTracker_v2';
+
+function getLocalProfile() {
+  try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || {}; } catch(e) { return {}; }
+}
+function getLocalState() {
+  try { return JSON.parse(localStorage.getItem(STATE_KEY))   || {}; } catch(e) { return {}; }
+}
+
+// Get userId — prefers the same UID stored by the main app
+// Falls back to generating one so old anonymous users still sync
+const UID_KEY = 'pomUserId_v1';
+function getUserId(profile) {
+  // If the main app has stored a UID, use it (consistent leaderboard identity)
+  try {
+    const stored = localStorage.getItem(UID_KEY);
+    if (stored) return stored;
+  } catch {}
+  // Legacy fallback: derive from name_prep (pre-auth users)
+  const raw = (profile.name || 'anon') + '_' + (profile.prep || 'user');
+  return raw.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 40);
+}
+
+// Sanitize user input before writing to Firestore
+function sanitize(str, maxLen) {
+  if (typeof str !== 'string') return 'Unknown';
+  return str.trim().replace(/<[^>]*>/g, '').slice(0, maxLen || 50) || 'Unknown';
+}
+
+// ── WRITE USER RECORD TO FIRESTORE ──
+async function syncUser() {
+  const profile = getLocalProfile();
+  const state   = getLocalState();
+  if (!profile.name) return; // not onboarded yet
+
+  const uid = getUserId(profile);
+  const studyMins  = Math.round((state.studySecs || 0) / 60);
+  const studyHours = (studyMins / 60).toFixed(1);
+  const running    = state.running || false;
+  const mode       = state.mode    || 'focus';
+
+  let status = 'idle';
+  if (running && mode === 'focus') status = 'studying';
+  else if (running && mode !== 'focus') status = 'break';
+
+  // Sanitize all fields before writing to Firestore
+  const record = {
+    uid,
+    name:        sanitize(profile.name, 30),
+    course:      sanitize(profile.prep || 'Unknown', 40),
+    pomodoros:   state.pomCount    || 0,
+    studyMins,
+    studyHours:  parseFloat(studyHours),
+    checkins:    state.checkinCount|| 0,
+    status,                          // 'studying' | 'break' | 'idle'
+    lastUpdated: serverTimestamp(),
+    date:        new Date().toISOString().slice(0, 10)
+  };
+
+  try {
+    await setDoc(doc(db, 'studyUsers', uid), record, { merge: true });
+  } catch(e) {
+    console.warn('Firestore write failed:', e.message);
+    showConfigWarning();
+  }
+}
+
+// ── PRESENCE via Realtime Database ──
+// Uses Firebase's built-in .info/connected to detect disconnects
+function setupPresence() {
+  const profile = getLocalProfile();
+  if (!profile.name) return;
+  const uid = getUserId(profile);
+
+  const presenceRef = ref(rtdb, `presence/${uid}`);
+  const connRef     = ref(rtdb, '.info/connected');
+
+  onValue(connRef, async (snap) => {
+    if (!snap.val()) return; // not connected yet
+
+    // When this client disconnects, set offline automatically
+    await onDisconnect(presenceRef).set({
+      online:     false,
+      lastSeen:   rtServerTimestamp(),
+      name:       profile.name,
+      uid
+    });
+
+    // Now mark as online
+    await set(presenceRef, {
+      online:  true,
+      joinedAt: rtServerTimestamp(),
+      name:    profile.name,
+      uid
+    });
+  });
+}
+
+// ── LISTEN TO ALL USERS (Firestore) & RENDER LEADERBOARD ──
+let allUsers = {};
+let onlineMap = {};
+
+function render() {
+  const users = Object.values(allUsers);
+
+  // Merge presence data
+  users.forEach(u => {
+    u.online = onlineMap[u.uid]?.online ?? false;
+  });
+
+  // Sort by pomodoros desc
+  users.sort((a, b) => b.pomodoros - a.pomodoros || b.studyMins - a.studyMins);
+
+  const onlineCount = users.filter(u => u.online).length;
+  document.getElementById('onlineCount').textContent = onlineCount;
+  document.getElementById('totalUsers').textContent  = users.length;
+
+  const tbody = document.getElementById('leaderBody');
+  tbody.innerHTML = '';
+
+  if (users.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--muted);font-style:italic;font-size:12px;">No study data yet — open your study app and complete a Pomodoro!</td></tr>`;
+    return;
+  }
+
+  users.forEach((u, i) => {
+    const rank    = i + 1;
+    const medal   = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
+    const online  = u.online;
+    const status  = u.status || 'idle';
+    const statusEmoji = status === 'studying' ? '🟢' : status === 'break' ? '🟡' : '⚫';
+    const statusLabel = status === 'studying' ? 'Studying' : status === 'break' ? 'On Break' : 'Idle';
+    const onlineDot   = online
+      ? `<span class="dot dot-online" title="Online"></span>`
+      : `<span class="dot dot-offline" title="Offline"></span>`;
+
+    const tr = document.createElement('tr');
+    tr.className = online ? 'row-online' : 'row-offline';
+    if (rank <= 3) tr.classList.add('row-top');
+
+    tr.innerHTML = `
+      <td class="td-rank">${medal}</td>
+      <td class="td-name">${onlineDot}<span class="name-text">${escHtml(u.name)}</span></td>
+      <td class="td-course"><span class="course-tag">${escHtml(u.course)}</span></td>
+      <td class="td-pom"><span class="pom-val">${u.pomodoros}</span> <span class="pom-label">🍅</span></td>
+      <td class="td-hours">${u.studyHours}h</td>
+      <td class="td-status"><span class="status-badge status-${status}">${statusEmoji} ${statusLabel}</span></td>
+      <td class="td-online">${online ? '<span class="online-pill">ONLINE</span>' : '<span class="offline-pill">OFFLINE</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Listen to Firestore — today's users only (no stale yesterday data)
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function listenLeaderboard() {
+  const { query, where } = window._fbExtraFns || {};
+  // Use today-only query if Firestore query helpers are available
+  const collRef = collection(db, 'studyUsers');
+  const q = (query && where) ? query(collRef, where('date', '==', todayISO())) : collRef;
+  onSnapshot(q, (snap) => {
+    allUsers = {};  // full refresh each time
+    snap.forEach(docSnap => {
+      allUsers[docSnap.id] = docSnap.data();
+    });
+    render();
+  }, (err) => {
+    console.warn('Firestore listener error:', err.message);
+    showConfigWarning();
+  });
+}
+
+// Listen to presence (Realtime DB)
+function listenPresence() {
+  const presenceListRef = ref(rtdb, 'presence');
+  onValue(presenceListRef, (snap) => {
+    onlineMap = snap.val() || {};
+    render();
+  });
+}
+
+function showConfigWarning() {
+  document.getElementById('configWarning').style.display = 'flex';
+}
+
+// ── INIT ──
+window.addEventListener('DOMContentLoaded', () => {
+  setupPresence();
+  syncUser();
+  listenLeaderboard();
+  listenPresence();
+
+  // Re-sync whenever localStorage changes (e.g. pomodoro completed)
+  window.addEventListener('storage', (e) => {
+    if (e.key === STATE_KEY || e.key === PROFILE_KEY) syncUser();
+  });
+
+  // Periodic sync every 30s (for same-tab updates)
+  setInterval(syncUser, 30000);
+
+  // Show who the current user is
+  const profile = getLocalProfile();
+  if (profile.name) {
+    document.getElementById('myNameDisplay').textContent  = profile.name;
+    document.getElementById('myCourseDisplay').textContent = profile.prep || '—';
+  } else {
+    document.getElementById('myCard').style.display = 'none';
+    document.getElementById('noProfileMsg').style.display = 'block';
+  }
+});
+
+// Make syncUser available globally for the "Sync Now" button
+window._syncUser = syncUser;
+</script>
+
+<style>
+:root {
+  --bg:     #07080f;
+  --s1:     #0d0e1a;
+  --s2:     #12131f;
+  --s3:     #1a1b2e;
+  --border: #252640;
+  --gold:   #f0b429;
+  --gold2:  #e07b00;
+  --glow:   rgba(240,180,41,0.15);
+  --red:    #ff3b55;
+  --green:  #00dfa2;
+  --blue:   #3d8bff;
+  --text:   #dde0f0;
+  --muted:  #7b7ea8;
+  --radius: 14px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ══ HEADER ══ */
+.header {
+  background: var(--s1);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;
+  letter-spacing: 5px;
+  background: linear-gradient(90deg, var(--gold), var(--gold2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.header-sub {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(0,223,162,0.08);
+  border: 1px solid rgba(0,223,162,0.3);
+  border-radius: 99px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--green);
+  letter-spacing: 1px;
+}
+.live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:0.5;transform:scale(1.4);} }
+
+.sync-btn {
+  background: var(--s3);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'Syne', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sync-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ══ CONFIG WARNING ══ */
+#configWarning {
+  display: none;
+  background: rgba(255,59,85,0.08);
+  border: 1.5px solid var(--red);
+  border-radius: var(--radius);
+  margin: 16px 16px 0;
+  padding: 14px 18px;
+  align-items: flex-start;
+  gap: 12px;
+}
+.warn-icon { font-size: 22px; flex-shrink: 0; }
+.warn-title { font-size: 13px; font-weight: 800; color: var(--red); letter-spacing: 1px; margin-bottom: 4px; }
+.warn-desc { font-size: 11px; color: var(--muted); line-height: 1.7; font-family: 'JetBrains Mono', monospace; }
+.warn-desc b { color: var(--text); }
+
+/* ══ MAIN LAYOUT ══ */
+.main { padding: 16px; max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+/* ══ STAT CARDS ══ */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat-card {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  text-align: center;
+}
+.stat-n { font-family: 'Bebas Neue', sans-serif; font-size: 38px; line-height: 1; letter-spacing: 2px; }
+.stat-l { font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+
+/* ══ MY CARD ══ */
+.my-card {
+  background: var(--s2);
+  border: 1.5px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  box-shadow: 0 0 20px var(--glow);
+}
+.my-label { font-size: 9px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--gold); margin-bottom: 4px; }
+.my-name { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 2px; color: var(--text); line-height: 1; }
+.my-course { font-size: 11px; font-weight: 700; color: var(--muted); margin-top: 2px; }
+.my-actions { display: flex; gap: 8px; align-items: center; }
+.back-btn {
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  border: none;
+  color: #000;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 13px;
+  letter-spacing: 2px;
+  padding: 9px 18px;
+  border-radius: 9px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#noProfileMsg {
+  display: none;
+  background: var(--s2);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+#noProfileMsg a { color: var(--gold); text-decoration: none; }
+
+/* ══ TABLE CARD ══ */
+.table-card {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.table-title { font-family: 'Bebas Neue', sans-serif; font-size: 14px; letter-spacing: 3px; color: var(--gold); }
+.table-meta { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1px; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  background: var(--s1);
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 10px 14px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr.row-online td { background: rgba(240,180,41,0.02); }
+tr.row-offline td { opacity: 0.55; }
+tr.row-top.row-online td { background: rgba(240,180,41,0.05); }
+tr:hover td { background: var(--s3); }
+
+.td-rank { font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 1px; color: var(--muted); white-space: nowrap; }
+.td-name { white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.name-text { font-size: 13px; font-weight: 700; }
+.td-course { white-space: nowrap; }
+.td-pom { white-space: nowrap; }
+.td-hours { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.td-status { white-space: nowrap; }
+.td-online { white-space: nowrap; }
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-online  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 1.5s infinite; }
+.dot-offline { background: var(--muted); }
+
+.course-tag {
+  background: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+.pom-val { font-family: 'Bebas Neue', sans-serif; font-size: 20px; color: var(--gold); letter-spacing: 1px; }
+.pom-label { font-size: 14px; }
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 4px 9px;
+  border-radius: 99px;
+}
+.status-studying { background: rgba(0,223,162,0.12); color: var(--green); border: 1px solid rgba(0,223,162,0.3); }
+.status-break    { background: rgba(240,180,41,0.1);  color: var(--gold);  border: 1px solid rgba(240,180,41,0.3); }
+.status-idle     { background: var(--s3); color: var(--muted); border: 1px solid var(--border); }
+
+.online-pill  { background: rgba(0,223,162,0.1); color: var(--green); border: 1px solid rgba(0,223,162,0.25); font-size: 9px; font-weight: 800; letter-spacing: 2px; padding: 3px 8px; border-radius: 99px; }
+.offline-pill { background: var(--s3); color: var(--muted); border: 1px solid var(--border); font-size: 9px; font-weight: 800; letter-spacing: 2px; padding: 3px 8px; border-radius: 99px; }
+
+/* ══ FIREBASE SETUP GUIDE ══ */
+.setup-card {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.setup-title { font-family: 'Bebas Neue', sans-serif; font-size: 14px; letter-spacing: 3px; color: var(--gold); margin-bottom: 14px; }
+.setup-steps { display: flex; flex-direction: column; gap: 10px; }
+.setup-step { display: flex; gap: 12px; align-items: flex-start; }
+.step-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  color: #000; font-family: 'Bebas Neue', sans-serif; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.step-content { flex: 1; }
+.step-text { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.5; }
+.step-sub { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.6; font-family: 'JetBrains Mono', monospace; }
+.step-sub b { color: var(--gold); }
+.step-sub a { color: var(--blue); }
+
+/* ══ SCROLLBAR ══ */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* ══ RESPONSIVE ══ */
+@media (max-width: 600px) {
+  .td-hours, .td-online { display: none; }
+  .header { padding: 10px 14px; }
+  .main { padding: 12px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══ HEADER ══ -->
+<div class="header">
+  <div>
+    <div class="logo">🍅 Study Together</div>
+    <div class="header-sub">Live Leaderboard · <span id="totalUsers">0</span> Aspirants</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      <span id="onlineCount">0</span> ONLINE NOW
+    </div>
+    <button class="sync-btn" onclick="window._syncUser && window._syncUser()">↻ SYNC</button>
+    <a href="https://abhinavagrawal-ai.github.io/study-app/" class="back-btn">← BACK TO APP</a>
+  </div>
+</div>
+
+<!-- ══ CONFIG WARNING (shown if Firebase config is not set) ══ -->
+<div id="configWarning">
+  <div class="warn-icon">⚠️</div>
+  <div>
+    <div class="warn-title">Firebase Not Configured</div>
+    <div class="warn-desc">
+      Replace the placeholder values in the <b>&lt;script&gt;</b> block at the top of this file.<br>
+      <b>apiKey, authDomain, databaseURL, projectId, storageBucket, messagingSenderId, appId</b><br>
+      Get these from: <b>console.firebase.google.com → Your Project → Settings → SDK Config</b>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ══ STATS ROW ══ -->
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="stat-n" style="color:var(--green)" id="onlineCount2">0</div>
+      <div class="stat-l">🟢 Online Now</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-n" style="color:var(--gold)" id="totalUsers2">0</div>
+      <div class="stat-l">👥 Total Users</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-n" style="color:var(--blue)" id="totalPoms">0</div>
+      <div class="stat-l">🍅 Poms Today</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-n" style="color:var(--gold2)" id="totalHours">0h</div>
+      <div class="stat-l">⏱ Hours Today</div>
+    </div>
+  </div>
+
+  <!-- ══ MY PROFILE CARD ══ -->
+  <div class="my-card" id="myCard">
+    <div>
+      <div class="my-label">📌 You Are</div>
+      <div class="my-name" id="myNameDisplay">—</div>
+      <div class="my-course" id="myCourseDisplay">—</div>
+    </div>
+    <div class="my-actions">
+      <a href="https://abhinavagrawal-ai.github.io/study-app/" class="back-btn">🍅 Open Study App</a>
+    </div>
+  </div>
+
+  <div id="noProfileMsg">
+    You haven't set up your profile yet. <a href="https://abhinavagrawal-ai.github.io/study-app/">Open the study app</a> and complete onboarding first!
+  </div>
+
+  <!-- ══ LEADERBOARD TABLE ══ -->
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-title">🏆 Today's Leaderboard</div>
+      <div class="table-meta" id="lastUpdatedLabel">Live · updates automatically</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Name</th>
+            <th>Course</th>
+            <th>Pomodoros</th>
+            <th>Hours</th>
+            <th>Status</th>
+            <th>Online</th>
+          </tr>
+        </thead>
+        <tbody id="leaderBody">
+          <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);font-size:12px;font-style:italic;">Connecting to database...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══ FIREBASE SETUP GUIDE ══ -->
+  <div class="setup-card">
+    <div class="setup-title">🔥 How To Set Up Firebase (One-Time, 5 Minutes)</div>
+    <div class="setup-steps">
+
+      <div class="setup-step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-text">Create a Firebase Project</div>
+          <div class="step-sub">Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> → Add Project → Give it a name (e.g. <b>study-app-db</b>) → Continue</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-text">Enable Firestore Database</div>
+          <div class="step-sub">Build → Firestore Database → Create Database → <b>Start in Test Mode</b> → Choose region (nam5 recommended) → Done</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-text">Enable Realtime Database (for presence)</div>
+          <div class="step-sub">Build → Realtime Database → Create Database → <b>Start in Test Mode</b> → Done</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <div class="step-text">Get Your Config Keys</div>
+          <div class="step-sub">Project Settings (⚙️) → Your Apps → Web App (&lt;/&gt;) → Register App → Copy the <b>firebaseConfig</b> object</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num" style="background:linear-gradient(135deg,var(--green),#00a87a);">✓</div>
+        <div class="step-content">
+          <div class="step-text" style="color:var(--green);">Config Already Pasted ✅</div>
+          <div class="step-sub">Your Firebase config for <b>pomodoro-tracker-48b92</b> is already set in this file. No changes needed here!</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num">6</div>
+        <div class="step-content">
+          <div class="step-text">Add This to Your study-app (index.html)</div>
+          <div class="step-sub">To auto-sync every time a pomodoro completes, add this one line to your <b>onEnd()</b> function in index.html:<br>
+          <b>if(window._syncStudyDB) window._syncStudyDB();</b><br>
+          Or just let the 30s auto-sync handle it — no change to index.html needed!</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- end main -->
+
+<script>
+// Mirror stat counts to second set of IDs
+const _origRender = window._origRender;
+// Patch online count display — sync both header + stat card
+const _origOnlineCount = document.getElementById('onlineCount');
+const _onlineCount2    = document.getElementById('onlineCount2');
+const _totalUsers2     = document.getElementById('totalUsers2');
+const _totalPoms       = document.getElementById('totalPoms');
+const _totalHours      = document.getElementById('totalHours');
+const _totalUsers      = document.getElementById('totalUsers');
+const _lastUpd         = document.getElementById('lastUpdatedLabel');
+
+// MutationObserver to mirror stats when the module updates them
+new MutationObserver(() => {
+  if (_onlineCount2) _onlineCount2.textContent = _origOnlineCount.textContent;
+  if (_totalUsers2)  _totalUsers2.textContent  = _totalUsers.textContent;
+}).observe(_origOnlineCount, { childList: true, characterData: true, subtree: true });
+new MutationObserver(() => {
+  if (_totalUsers2) _totalUsers2.textContent = _totalUsers.textContent;
+}).observe(_totalUsers, { childList: true, characterData: true, subtree: true });
+
+// Compute aggregate stats from table rows
+new MutationObserver(() => {
+  const rows = document.querySelectorAll('#leaderBody tr');
+  let poms = 0, hours = 0;
+  rows.forEach(r => {
+    const pomEl = r.querySelector('.pom-val');
+    const hrEl  = r.querySelector('.td-hours');
+    if (pomEl) poms += parseInt(pomEl.textContent) || 0;
+    if (hrEl)  hours += parseFloat(hrEl.textContent) || 0;
+  });
+  if (_totalPoms)  _totalPoms.textContent  = poms;
+  if (_totalHours) _totalHours.textContent = hours.toFixed(1) + 'h';
+  if (_lastUpd) _lastUpd.textContent = 'Last updated: ' + new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}).observe(document.getElementById('leaderBody'), { childList: true, subtree: true });
+</script>
+
+</body>
+</html>
