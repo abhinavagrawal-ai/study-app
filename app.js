@@ -1473,13 +1473,7 @@ function init() {
   initNetworkDetection();
   initKeyboardShortcuts();
   _applyAriaLabels();
-
-  // Dismiss loading screen
-  const loadScreen = $('appLoadingScreen');
-  if (loadScreen) {
-    loadScreen.classList.add('fade-out');
-    setTimeout(() => { loadScreen.style.display = 'none'; }, 450);
-  }
+  // Loading screen is dismissed by _appAuthReady() which calls init() — no need to repeat here
 }
 
 function _applyAriaLabels() {
@@ -1638,6 +1632,13 @@ window._appAuthReady = function(user) {
   const onboard    = $('onboardScreen');
   if (!authScreen) return;
 
+  // Always dismiss the loading screen regardless of auth state
+  const loadScreen = $('appLoadingScreen');
+  if (loadScreen && loadScreen.style.display !== 'none') {
+    loadScreen.classList.add('fade-out');
+    setTimeout(() => { loadScreen.style.display = 'none'; }, 450);
+  }
+
   if (user) {
     // Logged in — hide auth screen, show app
     authScreen.classList.add('hidden');
@@ -1662,13 +1663,29 @@ window._appAuthReady = function(user) {
 
 function boot() {
   // Hide app shell and onboarding via inline style — does not rely on CSS loading.
-  // The CSS 'hidden' class alone is not enough: if app.css fails to load (cache miss,
-  // 404, slow network) both screens bleed through as unstyled HTML.
   const appShell = document.querySelector('.app-shell');
   const onboard  = $('onboardScreen');
   if (appShell) appShell.style.display = 'none';
   if (onboard)  onboard.style.display  = 'none';
   bindAuthEvents();
+
+  // Hard timeout: if Firebase never calls _appAuthReady within 10s
+  // (e.g. SDK blocked, no network at all), clear the loading screen
+  // and show the auth form so the user isn't stuck forever.
+  setTimeout(() => {
+    const loadScreen = $('appLoadingScreen');
+    if (loadScreen && loadScreen.style.display !== 'none') {
+      loadScreen.classList.add('fade-out');
+      setTimeout(() => { loadScreen.style.display = 'none'; }, 450);
+      const authScreen = $('authScreen');
+      if (authScreen) {
+        authScreen.classList.remove('hidden');
+        authScreen.style.display = '';
+      }
+      const err = $('authError');
+      if (err) err.textContent = '⚠ Connection slow — check your internet';
+    }
+  }, 10000);
 }
 
 if (document.readyState === 'loading') {
